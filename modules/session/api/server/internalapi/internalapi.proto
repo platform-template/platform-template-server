@@ -1,0 +1,16 @@
+syntax = "proto3";
+package sessionInternalAPI;
+
+option go_package = "/.;sessioninternalapi";
+
+service SessionService {
+  rpc Echo(EchoRequest) returns (EchoResponse);
+}
+
+message EchoRequest {
+  string Body = 1;
+}
+
+message EchoResponse {
+  string OperationID = 1;
+}

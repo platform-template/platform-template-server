@@ -1,0 +1,9 @@
+syntax = "proto3";
+package sessionEvents;
+
+option go_package = "/.;sessionevents";
+
+message Echo {
+  string ID = 1;
+  string Body = 2;
+}
