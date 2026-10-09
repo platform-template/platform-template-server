@@ -1,47 +1,58 @@
 package domain
 
 import (
+	"errors"
+	"fmt"
 	"uuid"
 
 	"github.com/distributed-programming-2026/lib/event"
-
-	sessionevents "session/api/events"
 )
 
-type EchoService struct {
-	repo       EchoRepository
+var (
+	ErrInvalidUserID   = errors.New("invalid user ID")
+	ErrSessionNotFound = errors.New("session not found")
+	ErrSessionExpired  = errors.New("session expired")
+)
+
+type SessionService struct {
+	repo       SessionRepository
 	dispatcher event.Dispatcher
 }
 
-func NewEchoService(repo EchoRepository, dispatcher event.Dispatcher) *EchoService {
-	return &EchoService{
+func NewSessionService(repo SessionRepository, dispatcher event.Dispatcher) *SessionService {
+	return &SessionService{
 		repo:       repo,
 		dispatcher: dispatcher,
 	}
 }
 
-func (s *EchoService) Echo(body string) (uuid.UUID, error) {
+func (s *SessionService) Create(userID uuid.UUID) (SessionToken, error) {
+	if userID == uuid.Nil() {
+		return "", ErrInvalidUserID
+	}
+
 	id, err := s.repo.NextID()
 	if err != nil {
-		return uuid.Nil(), err
+		return "", fmt.Errorf("create session: generate ID: %w", err)
 	}
 
-	e := Echo{
-		ID:   id,
-		Body: body,
-	}
-
-	err = s.repo.Store(e)
+	token, err := GenerateSessionToken()
 	if err != nil {
-		return uuid.Nil(), err
+		return "", fmt.Errorf("create session: generate session token: %w", err)
 	}
 
-	err = s.dispatcher.Dispatch(&sessionevents.Echo{
-		ID:   e.ID.String(),
-		Body: e.Body,
-	})
-	if err != nil {
-		return uuid.Nil(), err
+	tokenHash := HashSessionToken(token)
+
+	session := Session{
+		id:        id,
+		userID:    userID,
+		tokenHash: tokenHash,
 	}
-	return id, nil
+
+	err = s.repo.Store(&session)
+	if err != nil {
+		return "", fmt.Errorf("create session: store session: %w", err)
+	}
+
+	return token, nil
 }
