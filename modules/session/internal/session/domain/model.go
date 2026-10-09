@@ -25,11 +25,11 @@ type SessionRepository interface {
 	Revoke(s *Session) error
 	FindByTokenHash(token SessionTokenHash) (*Session, error)
 	RevokeByTokenHash(token SessionTokenHash) error
-	RevokeAllByUserID(userID uuid.UUID) ([]Session, error)
+	RevokeAllByUserID(userID uuid.UUID) error
 }
 
-func (s *Session) IsExpired() bool {
-	return !time.Now().Before(s.expiresAt)
+func (s *Session) IsExpired(now time.Time) bool {
+	return !now.Before(s.expiresAt)
 }
 
 func GenerateSessionToken() (SessionToken, error) {
