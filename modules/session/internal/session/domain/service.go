@@ -5,24 +5,21 @@ import (
 	"fmt"
 	"time"
 	"uuid"
-
-	"github.com/distributed-programming-2026/lib/event"
 )
 
 var (
 	ErrInvalidUserID = errors.New("invalid user ID")
 	ErrInvalidToken  = errors.New("invalid user token")
+	ErrStoreSession  = errors.New("store session")
 )
 
 type SessionService struct {
-	repo       SessionRepository
-	dispatcher event.Dispatcher
+	repo SessionRepository
 }
 
-func NewSessionService(repo SessionRepository, dispatcher event.Dispatcher) *SessionService {
+func NewSessionService(repo SessionRepository) *SessionService {
 	return &SessionService{
-		repo:       repo,
-		dispatcher: dispatcher,
+		repo: repo,
 	}
 }
 
@@ -51,7 +48,7 @@ func (s *SessionService) Create(userID uuid.UUID) (SessionToken, error) {
 
 	err = s.repo.Store(&session)
 	if err != nil {
-		return "", fmt.Errorf("create session: store session: %w", err)
+		return "", fmt.Errorf("create session: %w: %w", ErrStoreSession, err)
 	}
 
 	return token, nil

@@ -22,7 +22,6 @@ type Session struct {
 type SessionRepository interface {
 	NextID() (uuid.UUID, error)
 	Store(s *Session) error
-	Revoke(s *Session) error
 	FindByTokenHash(token SessionTokenHash) (*Session, error)
 	RevokeByTokenHash(token SessionTokenHash) error
 	RevokeAllByUserID(userID uuid.UUID) error
