@@ -3,6 +3,7 @@ package domain
 import (
 	"errors"
 	"fmt"
+	"strings"
 	"uuid"
 )
 
@@ -28,6 +29,7 @@ func (s *IdentityService) Create(
 	login string,
 	email string,
 ) (uuid.UUID, error) {
+	login = strings.TrimSpace(login)
 	if login == "" {
 		return uuid.Nil(), fmt.Errorf("create user: %w", ErrInvalidLogin)
 	}
@@ -69,6 +71,7 @@ func (s *IdentityService) Create(
 }
 
 func (s *IdentityService) FindByLogin(login string) (*User, error) {
+	login = strings.TrimSpace(login)
 	if login == "" {
 		return nil, fmt.Errorf("find user by login: %w", ErrInvalidLogin)
 	}

@@ -49,6 +49,11 @@ func NewUser(
 	login string,
 	email Email,
 ) (*User, error) {
+	firstName = strings.TrimSpace(firstName)
+	lastName = strings.TrimSpace(lastName)
+	middleName = strings.TrimSpace(middleName)
+	login = strings.TrimSpace(login)
+
 	if id == uuid.Nil() {
 		return nil, ErrInvalidUserID
 	}
@@ -61,8 +66,9 @@ func NewUser(
 	if login == "" {
 		return nil, ErrInvalidLogin
 	}
-	if email == "" {
-		return nil, ErrInvalidEmail
+	validatedEmail, err := NewEmail(string(email))
+	if err != nil {
+		return nil, err
 	}
 
 	return &User{
@@ -71,7 +77,7 @@ func NewUser(
 		lastName:   lastName,
 		middleName: middleName,
 		login:      login,
-		email:      email,
+		email:      validatedEmail,
 	}, nil
 }
 
