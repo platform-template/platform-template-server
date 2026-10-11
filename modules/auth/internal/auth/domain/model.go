@@ -1,13 +1,49 @@
 package domain
 
-import "uuid"
+import (
+	"errors"
+	"uuid"
+)
 
-type Echo struct {
-	ID   uuid.UUID
-	Body string
+var (
+	ErrPasswordUnchanged       = errors.New("new password must differ from current password")
+	ErrCredentialNotFound      = errors.New("password credential not found")
+	ErrCredentialAlreadyExists = errors.New("password credential already exists")
+	ErrInvalidPassword         = errors.New("invalid password")
+	ErrInvalidUserID           = errors.New("invalid user ID")
+	ErrInvalidPasswordHash     = errors.New("invalid password hash")
+)
+
+type PasswordCredential struct {
+	userID       uuid.UUID
+	passwordHash string
 }
 
-type EchoRepository interface {
-	NextID() (uuid.UUID, error)
-	Store(Echo) error
+func NewPasswordCredential(userID uuid.UUID, passwordHash string) (*PasswordCredential, error) {
+	if userID == uuid.Nil() {
+		return nil, ErrInvalidUserID
+	}
+	if passwordHash == "" {
+		return nil, ErrInvalidPasswordHash
+	}
+
+	return &PasswordCredential{
+		userID:       userID,
+		passwordHash: passwordHash,
+	}, nil
+}
+
+func (pc *PasswordCredential) changePasswordHash(passwordHash string) error {
+	if passwordHash == "" {
+		return ErrInvalidPasswordHash
+	}
+
+	pc.passwordHash = passwordHash
+	return nil
+}
+
+type AuthRepository interface {
+	Store(*PasswordCredential) error
+	Change(*PasswordCredential) error
+	FindByUserID(uuid.UUID) (*PasswordCredential, error)
 }
