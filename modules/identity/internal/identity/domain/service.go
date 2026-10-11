@@ -8,6 +8,7 @@ import (
 
 var (
 	ErrLoginAlreadyExists = errors.New("login already exists")
+	ErrUserNotFound       = errors.New("user not found")
 )
 
 type IdentityService struct {
@@ -65,4 +66,20 @@ func (s *IdentityService) Create(
 	}
 
 	return id, nil
+}
+
+func (s *IdentityService) FindByLogin(login string) (*User, error) {
+	if login == "" {
+		return nil, fmt.Errorf("find user by login: %w", ErrInvalidLogin)
+	}
+
+	user, err := s.repo.FindByLogin(login)
+	if err != nil {
+		return nil, fmt.Errorf("find user by login: %w", err)
+	}
+	if user == nil {
+		return nil, fmt.Errorf("find user by login: %w", ErrUserNotFound)
+	}
+
+	return user, nil
 }
