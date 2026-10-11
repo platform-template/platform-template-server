@@ -1,47 +1,68 @@
 package domain
 
 import (
+	"errors"
+	"fmt"
 	"uuid"
-
-	"github.com/distributed-programming-2026/lib/event"
-
-	identityevents "identity/api/events"
 )
 
-type EchoService struct {
-	repo       EchoRepository
-	dispatcher event.Dispatcher
+var (
+	ErrLoginAlreadyExists = errors.New("login already exists")
+)
+
+type IdentityService struct {
+	repo IdentityRepository
 }
 
-func NewEchoService(repo EchoRepository, dispatcher event.Dispatcher) *EchoService {
-	return &EchoService{
-		repo:       repo,
-		dispatcher: dispatcher,
+func NewIdentityService(repo IdentityRepository) *IdentityService {
+	return &IdentityService{
+		repo: repo,
 	}
 }
 
-func (s *EchoService) Echo(body string) (uuid.UUID, error) {
+func (s *IdentityService) Create(
+	firstName string,
+	lastName string,
+	middleName string,
+	login string,
+	email string,
+) (uuid.UUID, error) {
+	if login == "" {
+		return uuid.Nil(), fmt.Errorf("create user: %w", ErrInvalidLogin)
+	}
+	foundUser, err := s.repo.FindByLogin(login)
+	if err != nil {
+		return uuid.Nil(), fmt.Errorf("create user: find by login: %w", err)
+	}
+	if foundUser != nil {
+		return uuid.Nil(), fmt.Errorf("create user: %w", ErrLoginAlreadyExists)
+	}
+
 	id, err := s.repo.NextID()
 	if err != nil {
 		return uuid.Nil(), err
 	}
 
-	e := Echo{
-		ID:   id,
-		Body: body,
+	verifiedEmail, err := NewEmail(email)
+	if err != nil {
+		return uuid.Nil(), fmt.Errorf("create user: %w", err)
 	}
 
-	err = s.repo.Store(e)
+	user, err := NewUser(
+		id,
+		firstName,
+		lastName,
+		middleName,
+		login,
+		verifiedEmail,
+	)
 	if err != nil {
-		return uuid.Nil(), err
+		return uuid.Nil(), fmt.Errorf("create user: new user: %w", err)
+	}
+	err = s.repo.Store(user)
+	if err != nil {
+		return uuid.Nil(), fmt.Errorf("create user: store: %w", err)
 	}
 
-	err = s.dispatcher.Dispatch(&identityevents.Echo{
-		ID:   e.ID.String(),
-		Body: e.Body,
-	})
-	if err != nil {
-		return uuid.Nil(), err
-	}
 	return id, nil
 }
