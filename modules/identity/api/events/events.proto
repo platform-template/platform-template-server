@@ -1,0 +1,9 @@
+syntax = "proto3";
+package identityEvents;
+
+option go_package = "/.;identityevents";
+
+message Echo {
+  string ID = 1;
+  string Body = 2;
+}
