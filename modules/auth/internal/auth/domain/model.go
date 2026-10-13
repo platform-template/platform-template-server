@@ -33,6 +33,14 @@ func NewPasswordCredential(userID uuid.UUID, passwordHash string) (*PasswordCred
 	}, nil
 }
 
+func (pc *PasswordCredential) UserID() uuid.UUID {
+	return pc.userID
+}
+
+func (pc *PasswordCredential) PasswordHash() string {
+	return pc.passwordHash
+}
+
 func (pc *PasswordCredential) changePasswordHash(passwordHash string) error {
 	if passwordHash == "" {
 		return ErrInvalidPasswordHash
