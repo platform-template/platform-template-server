@@ -9,7 +9,7 @@ import (
 	"auth/internal/auth/infra/mysql/repository"
 )
 
-func NewRepositoryProvider(client mysql.ClientContext) *RepositoryProvider {
+func NewAuthRepository(client mysql.ClientContext) *RepositoryProvider {
 	return &RepositoryProvider{
 		client: client,
 	}
@@ -19,6 +19,6 @@ type RepositoryProvider struct {
 	client mysql.ClientContext
 }
 
-func (p *RepositoryProvider) Echo(ctx context.Context) domain.EchoRepository {
-	return repository.NewEchoRepository(ctx, p.client)
+func (p *RepositoryProvider) Auth(ctx context.Context) domain.AuthRepository {
+	return repository.NewAuthRepository(ctx, p.client)
 }
