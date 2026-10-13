@@ -9,7 +9,7 @@ import (
 	"auth/internal/auth/infra/mysql/repository"
 )
 
-func NewAuthRepository(client mysql.ClientContext) *RepositoryProvider {
+func NewRepositoryProvider(client mysql.ClientContext) *RepositoryProvider {
 	return &RepositoryProvider{
 		client: client,
 	}

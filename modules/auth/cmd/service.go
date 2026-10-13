@@ -10,7 +10,7 @@ import (
 
 	"auth/internal/auth/app"
 	"auth/internal/auth/config"
-	eventinfra "auth/internal/auth/infra/event"
+	"auth/internal/auth/infra/password"
 )
 
 func (a *application) serviceCmd() *cli.Command {
@@ -36,7 +36,7 @@ func service(ctx context.Context, logger *slog.Logger, conf config.Env) (err err
 		err = errors.Join(err, connection.Stop())
 	}()
 
-	dispatcher, relay, err := newDispatcher(logger, conf, db, connection)
+	_, relay, err := newDispatcher(logger, conf, db, connection)
 	if err != nil {
 		return err
 	}
@@ -46,8 +46,7 @@ func service(ctx context.Context, logger *slog.Logger, conf config.Env) (err err
 		return err
 	}
 
-	dispatcherFactory := eventinfra.NewDispatcherFactory(appID, dispatcher)
-	svc := app.NewService(db.unit, dispatcherFactory)
+	svc := app.NewService(db.unit, password.NewArgon2Hasher())
 	httpServer, err := newHTTPServer(logger, conf, svc)
 	if err != nil {
 		return err
