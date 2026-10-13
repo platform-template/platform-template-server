@@ -4,13 +4,29 @@ package sessionInternalAPI;
 option go_package = "/.;sessioninternalapi";
 
 service SessionService {
-  rpc Echo(EchoRequest) returns (EchoResponse);
+  rpc CreateSession(CreateSessionRequest) returns (CreateSessionResponse);
+  rpc ResolveSession(ResolveSessionRequest) returns (ResolveSessionResponse);
+  rpc RevokeSession(RevokeSessionRequest) returns (RevokeSessionResponse);
 }
 
-message EchoRequest {
-  string Body = 1;
+message CreateSessionRequest {
+  string user_id = 1;
 }
 
-message EchoResponse {
-  string OperationID = 1;
+message CreateSessionResponse {
+  string token = 1;
 }
+
+message ResolveSessionRequest {
+  string token = 1;
+}
+
+message ResolveSessionResponse {
+  string user_id = 1;
+}
+
+message RevokeSessionRequest {
+  string token = 1;
+}
+
+message RevokeSessionResponse {}

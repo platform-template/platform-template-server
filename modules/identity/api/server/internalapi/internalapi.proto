@@ -4,13 +4,26 @@ package identityInternalAPI;
 option go_package = "/.;identityinternalapi";
 
 service IdentityService {
-  rpc Echo(EchoRequest) returns (EchoResponse);
+  rpc CreateUser(CreateUserRequest) returns (CreateUserResponse);
+  rpc FindUserByLogin(FindUserByLoginRequest) returns (FindUserByLoginResponse);
 }
 
-message EchoRequest {
-  string Body = 1;
+message CreateUserRequest {
+  string first_name = 1;
+  string last_name = 2;
+  string middle_name = 3;
+  string login = 4;
+  string email = 5;
 }
 
-message EchoResponse {
-  string OperationID = 1;
+message CreateUserResponse {
+  string user_id = 1;
+}
+
+message FindUserByLoginRequest {
+  string login = 1;
+}
+
+message FindUserByLoginResponse {
+  string user_id = 1;
 }
