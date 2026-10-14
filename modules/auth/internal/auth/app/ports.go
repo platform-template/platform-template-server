@@ -13,5 +13,6 @@ type IdentityClient interface {
 type SessionClient interface {
 	Create(ctx context.Context, userID uuid.UUID) (string, error)
 	Resolve(ctx context.Context, token string) (uuid.UUID, error)
-	RevokeByToken(ctx context.Context, token string) error
+	RevokeSession(ctx context.Context, token string) error
+	RevokeOthersByUserID(ctx context.Context, userID uuid.UUID, token string) error
 }

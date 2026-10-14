@@ -7,6 +7,7 @@ service SessionService {
   rpc CreateSession(CreateSessionRequest) returns (CreateSessionResponse);
   rpc ResolveSession(ResolveSessionRequest) returns (ResolveSessionResponse);
   rpc RevokeSession(RevokeSessionRequest) returns (RevokeSessionResponse);
+  rpc RevokeOthersByUserID(RevokeOthersByUserIDRequest) returns (RevokeOthersByUserIDResponse);
 }
 
 message CreateSessionRequest {
@@ -30,3 +31,10 @@ message RevokeSessionRequest {
 }
 
 message RevokeSessionResponse {}
+
+message RevokeOthersByUserIDRequest {
+  string user_id = 1;
+  string token = 2;
+}
+
+message RevokeOthersByUserIDResponse {}
