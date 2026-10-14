@@ -24,11 +24,15 @@ func (v version1791225168) Description() string {
 }
 
 func (v version1791225168) Up(ctx context.Context) error {
-	_, err := v.client.ExecContext(ctx, "create-echo-table", `
-CREATE TABLE IF NOT EXISTS echo (
+	_, err := v.client.ExecContext(ctx, "create-sessions-table", `
+CREATE TABLE IF NOT EXISTS sessions (
     id CHAR(36) CHARACTER SET ascii NOT NULL PRIMARY KEY,
-    body LONGTEXT NOT NULL
-) ENGINE=InnoDB CHARACTER SET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+    user_id CHAR(36) CHARACTER SET ascii NOT NULL,
+    token_hash CHAR(64) CHARACTER SET ascii NOT NULL UNIQUE,
+    expires_at DATETIME(6) NOT NULL,
+    created_at DATETIME(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6),
+    INDEX idx_sessions_user_id (user_id)
+) ENGINE=InnoDB CHARACTER SET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 `)
 	return err
 }

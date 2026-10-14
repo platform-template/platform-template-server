@@ -7,10 +7,14 @@ import (
 	"uuid"
 )
 
+const SessionTTL = 1 * 24 * time.Hour
+
 var (
-	ErrInvalidUserID = errors.New("invalid user ID")
-	ErrInvalidToken  = errors.New("invalid user token")
-	ErrStoreSession  = errors.New("store session")
+	ErrInvalidUserID   = errors.New("invalid user ID")
+	ErrInvalidToken    = errors.New("invalid session token")
+	ErrSessionNotFound = errors.New("session not found")
+	ErrSessionExpired  = errors.New("session expired")
+	ErrStoreSession    = errors.New("store session")
 )
 
 type SessionService struct {
@@ -18,9 +22,7 @@ type SessionService struct {
 }
 
 func NewSessionService(repo SessionRepository) *SessionService {
-	return &SessionService{
-		repo: repo,
-	}
+	return &SessionService{repo: repo}
 }
 
 func (s *SessionService) Create(userID uuid.UUID) (SessionToken, error) {
@@ -35,38 +37,38 @@ func (s *SessionService) Create(userID uuid.UUID) (SessionToken, error) {
 
 	token, err := GenerateSessionToken()
 	if err != nil {
-		return "", fmt.Errorf("create session: generate session token: %w", err)
+		return "", fmt.Errorf("create session: generate token: %w", err)
 	}
 
-	tokenHash := HashSessionToken(token)
-
-	session := Session{
-		id:        id,
-		userID:    userID,
-		tokenHash: tokenHash,
-	}
-
-	err = s.repo.Store(&session)
+	session, err := NewSession(id, userID, HashSessionToken(token), time.Now().UTC().Add(SessionTTL))
 	if err != nil {
+		return "", fmt.Errorf("create session: new session: %w", err)
+	}
+
+	if err := s.repo.Store(session); err != nil {
 		return "", fmt.Errorf("create session: %w: %w", ErrStoreSession, err)
 	}
 
 	return token, nil
 }
 
-func (s *SessionService) Validate(token SessionToken) (bool, error) {
+func (s *SessionService) Resolve(token SessionToken) (uuid.UUID, error) {
 	if token == "" {
-		return false, fmt.Errorf("validate session: %w", ErrInvalidToken)
+		return uuid.Nil(), fmt.Errorf("resolve session: %w", ErrInvalidToken)
 	}
 
-	tokenHash := HashSessionToken(token)
-
-	session, err := s.repo.FindByTokenHash(tokenHash)
+	session, err := s.repo.FindByTokenHash(HashSessionToken(token))
 	if err != nil {
-		return false, fmt.Errorf("validate session: find by token hash: %w", err)
+		return uuid.Nil(), fmt.Errorf("resolve session: find by token hash: %w", err)
+	}
+	if session == nil {
+		return uuid.Nil(), fmt.Errorf("resolve session: %w", ErrSessionNotFound)
+	}
+	if session.IsExpired(time.Now()) {
+		return uuid.Nil(), fmt.Errorf("resolve session: %w", ErrSessionExpired)
 	}
 
-	return !session.IsExpired(time.Now()), nil
+	return session.userID, nil
 }
 
 func (s *SessionService) RevokeByToken(token SessionToken) error {
@@ -74,24 +76,29 @@ func (s *SessionService) RevokeByToken(token SessionToken) error {
 		return fmt.Errorf("revoke session: %w", ErrInvalidToken)
 	}
 
-	tokenHash := HashSessionToken(token)
-
-	err := s.repo.RevokeByTokenHash(tokenHash)
-	if err != nil {
+	if err := s.repo.RevokeByTokenHash(HashSessionToken(token)); err != nil {
 		return fmt.Errorf("revoke session: %w", err)
 	}
 
 	return nil
 }
 
-func (s *SessionService) RevokeAllByUserID(userID uuid.UUID) error {
+func (s *SessionService) RevokeOthersByUserID(userID uuid.UUID, token SessionToken) error {
 	if userID == uuid.Nil() {
-		return fmt.Errorf("revoke all sessions: %w", ErrInvalidUserID)
+		return fmt.Errorf("revoke other sessions: %w", ErrInvalidUserID)
 	}
 
-	err := s.repo.RevokeAllByUserID(userID)
+	currentUserID, err := s.Resolve(token)
 	if err != nil {
-		return fmt.Errorf("revoke all sessions: %w", err)
+		return fmt.Errorf("revoke other sessions: resolve token: %w", err)
+	}
+	if currentUserID != userID {
+		return fmt.Errorf("revoke other sessions: %w", ErrInvalidToken)
+	}
+
+	tokenHash := HashSessionToken(token)
+	if err := s.repo.RevokeOthersByUserID(userID, tokenHash); err != nil {
+		return fmt.Errorf("revoke other sessions: %w", err)
 	}
 
 	return nil

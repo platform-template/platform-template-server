@@ -2,49 +2,77 @@ package app
 
 import (
 	"context"
+	"fmt"
 	"uuid"
 
 	"github.com/distributed-programming-2026/go-sdk/pkg/uow"
-
-	domainevent "github.com/distributed-programming-2026/lib/event"
 
 	"session/internal/session/domain"
 	"session/internal/session/infra/mysql"
 )
 
-type DispatcherFactory interface {
-	NewDispatcher(ctx context.Context) domainevent.Dispatcher
-}
-
 type Service struct {
-	unit              uow.UnitOfWorkWithRepositoryProvider[*mysql.RepositoryProvider]
-	dispatcherFactory DispatcherFactory
+	unit uow.UnitOfWorkWithRepositoryProvider[*mysql.RepositoryProvider]
 }
 
-func NewService(
-	unit uow.UnitOfWorkWithRepositoryProvider[*mysql.RepositoryProvider],
-	dispatcherFactory DispatcherFactory,
-) *Service {
-	return &Service{
-		unit:              unit,
-		dispatcherFactory: dispatcherFactory,
-	}
+func NewService(unit uow.UnitOfWorkWithRepositoryProvider[*mysql.RepositoryProvider]) *Service {
+	return &Service{unit: unit}
 }
 
-func (s *Service) Echo(ctx context.Context, body string) (uuid.UUID, error) {
-	var id uuid.UUID
+func (s *Service) Create(ctx context.Context, userID uuid.UUID) (string, error) {
+	var token domain.SessionToken
+
 	err := s.unit.ExecuteWithRepositoryProvider(ctx, func(provider *mysql.RepositoryProvider) error {
-		svc := domain.NewEchoService(
-			provider.Echo(ctx),
-			s.dispatcherFactory.NewDispatcher(ctx),
-		)
+		svc := domain.NewSessionService(provider.Session(ctx))
 
 		var err error
-		id, err = svc.Echo(body)
+		token, err = svc.Create(userID)
 		return err
 	})
 	if err != nil {
-		return uuid.Nil(), err
+		return "", fmt.Errorf("create session: %w", err)
 	}
-	return id, nil
+
+	return string(token), nil
+}
+
+func (s *Service) Resolve(ctx context.Context, token string) (uuid.UUID, error) {
+	var userID uuid.UUID
+
+	err := s.unit.ExecuteWithRepositoryProvider(ctx, func(provider *mysql.RepositoryProvider) error {
+		svc := domain.NewSessionService(provider.Session(ctx))
+
+		var err error
+		userID, err = svc.Resolve(domain.SessionToken(token))
+		return err
+	})
+	if err != nil {
+		return uuid.Nil(), fmt.Errorf("resolve session: %w", err)
+	}
+
+	return userID, nil
+}
+
+func (s *Service) RevokeByToken(ctx context.Context, token string) error {
+	err := s.unit.ExecuteWithRepositoryProvider(ctx, func(provider *mysql.RepositoryProvider) error {
+		svc := domain.NewSessionService(provider.Session(ctx))
+		return svc.RevokeByToken(domain.SessionToken(token))
+	})
+	if err != nil {
+		return fmt.Errorf("revoke session: %w", err)
+	}
+
+	return nil
+}
+
+func (s *Service) RevokeOthersByUserID(ctx context.Context, userID uuid.UUID, token string) error {
+	err := s.unit.ExecuteWithRepositoryProvider(ctx, func(provider *mysql.RepositoryProvider) error {
+		svc := domain.NewSessionService(provider.Session(ctx))
+		return svc.RevokeOthersByUserID(userID, domain.SessionToken(token))
+	})
+	if err != nil {
+		return fmt.Errorf("revoke other sessions: %w", err)
+	}
+
+	return nil
 }
