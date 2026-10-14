@@ -20,7 +20,7 @@ func (v version1791225168) Version() int64 {
 }
 
 func (v version1791225168) Description() string {
-	return "Create echo table"
+	return "Create sessions table"
 }
 
 func (v version1791225168) Up(ctx context.Context) error {
