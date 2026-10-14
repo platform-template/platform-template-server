@@ -81,6 +81,26 @@ func NewUser(
 	}, nil
 }
 
+type UserData struct {
+	ID         uuid.UUID
+	FirstName  string
+	LastName   string
+	MiddleName string
+	Login      string
+	Email      Email
+}
+
+func (u *User) Data() *UserData {
+	return &UserData{
+		ID:         u.id,
+		FirstName:  u.firstName,
+		LastName:   u.lastName,
+		MiddleName: u.middleName,
+		Login:      u.login,
+		Email:      u.email,
+	}
+}
+
 type IdentityRepository interface {
 	NextID() (uuid.UUID, error)
 	Store(*User) error
