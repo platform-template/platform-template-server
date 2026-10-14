@@ -2,49 +2,64 @@ package app
 
 import (
 	"context"
+	"fmt"
 	"uuid"
 
 	"github.com/distributed-programming-2026/go-sdk/pkg/uow"
-
-	domainevent "github.com/distributed-programming-2026/lib/event"
 
 	"identity/internal/identity/domain"
 	"identity/internal/identity/infra/mysql"
 )
 
-type DispatcherFactory interface {
-	NewDispatcher(ctx context.Context) domainevent.Dispatcher
-}
-
 type Service struct {
-	unit              uow.UnitOfWorkWithRepositoryProvider[*mysql.RepositoryProvider]
-	dispatcherFactory DispatcherFactory
+	unit uow.UnitOfWorkWithRepositoryProvider[*mysql.RepositoryProvider]
 }
 
-func NewService(
-	unit uow.UnitOfWorkWithRepositoryProvider[*mysql.RepositoryProvider],
-	dispatcherFactory DispatcherFactory,
-) *Service {
-	return &Service{
-		unit:              unit,
-		dispatcherFactory: dispatcherFactory,
-	}
+func NewService(unit uow.UnitOfWorkWithRepositoryProvider[*mysql.RepositoryProvider]) *Service {
+	return &Service{unit: unit}
 }
 
-func (s *Service) Echo(ctx context.Context, body string) (uuid.UUID, error) {
-	var id uuid.UUID
+func (s *Service) Create(
+	ctx context.Context,
+	firstName,
+	lastName,
+	middleName,
+	login,
+	email string,
+) (uuid.UUID, error) {
+	var userID uuid.UUID
+
 	err := s.unit.ExecuteWithRepositoryProvider(ctx, func(provider *mysql.RepositoryProvider) error {
-		svc := domain.NewEchoService(
-			provider.Echo(ctx),
-			s.dispatcherFactory.NewDispatcher(ctx),
-		)
+		svc := domain.NewIdentityService(provider.Identity(ctx))
 
 		var err error
-		id, err = svc.Echo(body)
+		userID, err = svc.Create(firstName, lastName, middleName, login, email)
 		return err
 	})
 	if err != nil {
-		return uuid.Nil(), err
+		return uuid.Nil(), fmt.Errorf("identity: create user: %w", err)
 	}
-	return id, nil
+
+	return userID, nil
+}
+
+func (s *Service) FindByLogin(ctx context.Context, login string) (uuid.UUID, error) {
+	var userID uuid.UUID
+
+	err := s.unit.ExecuteWithRepositoryProvider(ctx, func(provider *mysql.RepositoryProvider) error {
+		svc := domain.NewIdentityService(provider.Identity(ctx))
+
+		user, err := svc.FindByLogin(login)
+		if err != nil {
+			return err
+		}
+
+		userID = user.Data().ID
+		return nil
+	})
+	if err != nil {
+		return uuid.Nil(), fmt.Errorf("identity: find user by login: %w", err)
+	}
+
+	return userID, nil
 }
