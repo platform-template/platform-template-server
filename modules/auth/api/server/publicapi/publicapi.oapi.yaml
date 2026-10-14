@@ -1,38 +1,165 @@
+
 openapi: 3.0.0
+
 info:
-  version: 1.0.0
   title: Auth service public API
+  version: 1.0.0
   x-api-identifier: authpublicapi
+
 paths:
-  /api/public/v1/echo:
+  /api/public/v1/auth/register:
     post:
-      operationId: echo
+      operationId: register
+      summary: Register user
       requestBody:
         required: true
         content:
           application/json:
             schema:
-              $ref: "#/components/schemas/echoRequest"
+              $ref: "#/components/schemas/registerRequest"
       responses:
-        "200":
-          description: OK
+        "201":
+          description: User created
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/echoResponseData"
+                $ref: "#/components/schemas/registerResponse"
+        "400":
+          description: Invalid user data
+        "409":
+          description: Login already exists
+        "500":
+          description: Internal server error
+
+  /api/public/v1/auth/login:
+    post:
+      operationId: login
+      summary: Log in
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/loginRequest"
+      responses:
+        "204":
+          description: Logged in successfully
+          headers:
+            Set-Cookie:
+              description: HttpOnly session cookie
+              schema:
+                type: string
+        "400":
+          description: Invalid request
+        "401":
+          description: Invalid credentials
+        "500":
+          description: Internal server error
+
+  /api/public/v1/auth/logout:
+    post:
+      operationId: logout
+      summary: Log out
+      security:
+        - sessionAuth: []
+      responses:
+        "204":
+          description: Logged out successfully
+          headers:
+            Set-Cookie:
+              description: Clear session cookie
+              schema:
+                type: string
+        "500":
+          description: Internal server error
+
+  /api/public/v1/auth/change-password:
+    post:
+      operationId: changePassword
+      summary: Change password
+      security:
+        - sessionAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/changePasswordRequest"
+      responses:
+        "204":
+          description: Password changed
+        "400":
+          description: Invalid new password
+        "401":
+          description: Invalid session or old password
+        "409":
+          description: New password matches the old password
+        "500":
+          description: Internal server error
+
 components:
+  securitySchemes:
+    sessionAuth:
+      type: apiKey
+      in: cookie
+      name: session
+
   schemas:
-    echoRequest:
+    registerRequest:
       type: object
-      properties:
-        body:
-          type: string
       required:
-        - body
-    echoResponseData:
+        - firstName
+        - lastName
+        - login
+        - email
+        - password
+      properties:
+        firstName:
+          type: string
+          minLength: 1
+        lastName:
+          type: string
+          minLength: 1
+        middleName:
+          type: string
+        login:
+          type: string
+          minLength: 1
+        email:
+          type: string
+          format: email
+        password:
+          type: string
+          minLength: 8
+
+    registerResponse:
       type: object
-      properties:
-        operationID:
-          type: string
       required:
-        - operationID
+        - userId
+      properties:
+        userId:
+          type: string
+          format: uuid
+
+    loginRequest:
+      type: object
+      required:
+        - login
+        - password
+      properties:
+        login:
+          type: string
+        password:
+          type: string
+
+    changePasswordRequest:
+      type: object
+      required:
+        - oldPassword
+        - newPassword
+      properties:
+        oldPassword:
+          type: string
+        newPassword:
+          type: string
+          minLength: 8
