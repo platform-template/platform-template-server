@@ -5,13 +5,19 @@ import (
 	"time"
 )
 
+type RemoteService struct {
+	Address string `envconfig:"address"`
+}
+
 type Env struct {
-	App   App   `envconfig:"app"`
-	GRPC  GRPC  `envconfig:"grpc"`
-	HTTP  HTTP  `envconfig:"http"`
-	MySQL MySQL `envconfig:"mysql"`
-	AMQP  AMQP  `envconfig:"amqp"`
-	Relay Relay `envconfig:"relay"`
+	App      App           `envconfig:"app"`
+	GRPC     GRPC          `envconfig:"grpc"`
+	HTTP     HTTP          `envconfig:"http"`
+	MySQL    MySQL         `envconfig:"mysql"`
+	AMQP     AMQP          `envconfig:"amqp"`
+	Relay    Relay         `envconfig:"relay"`
+	Identity RemoteService `envconfig:"identity"`
+	Session  RemoteService `envconfig:"session"`
 }
 
 type App struct {
@@ -66,6 +72,9 @@ func (c Env) Validate() error {
 	}
 	if c.MySQL.Address == "" || c.MySQL.Database == "" || c.MySQL.User == "" || c.AMQP.URL == "" || c.AMQP.Queue == "" || c.HTTP.Address == "" || c.GRPC.Address == "" {
 		return errors.New("database, broker and server configuration must not be empty")
+	}
+	if c.Identity.Address == "" || c.Session.Address == "" {
+		return errors.New("identity and session addresses must not be empty")
 	}
 	return nil
 }

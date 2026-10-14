@@ -46,7 +46,16 @@ func service(ctx context.Context, logger *slog.Logger, conf config.Env) (err err
 		return err
 	}
 
-	svc := app.NewService(db.unit, password.NewArgon2Hasher())
+	identityClient, sessionClient, closeClients, err := newGRPCClients(conf)
+	if err != nil {
+		return err
+	}
+	defer func() {
+		err = errors.Join(err, closeClients())
+	}()
+
+	svc := app.NewService(db.unit, password.NewArgon2Hasher(), identityClient, sessionClient)
+
 	httpServer, err := newHTTPServer(logger, conf, svc)
 	if err != nil {
 		return err

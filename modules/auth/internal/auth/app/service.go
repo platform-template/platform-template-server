@@ -76,6 +76,9 @@ func (s *Service) Register(ctx context.Context, input RegisterInput) (uuid.UUID,
 
 func (s *Service) Login(ctx context.Context, login, password string) (string, error) {
 	userID, err := s.identity.FindByLogin(ctx, login)
+	if errors.Is(err, ErrUserNotFound) {
+		return "", fmt.Errorf("login: %w", ErrInvalidCredentials)
+	}
 	if err != nil {
 		return "", fmt.Errorf("login: find by login: %w", err)
 	}
