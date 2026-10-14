@@ -7,6 +7,8 @@ services:
     environment:
       AUTH_MYSQL_ADDRESS: mysql:3306
       AUTH_AMQP_URL: amqp://local:local@rabbitmq:5672/
+      AUTH_IDENTITY_ADDRESS: identity-service:8081
+      AUTH_SESSION_ADDRESS: session-service:8081
     ports:
       - "${AUTH_GRPC_PORT:-8081}:8081"
       - "${AUTH_HTTP_PORT:-8082}:8082"

@@ -3,6 +3,7 @@ module auth
 go 1.27.1
 
 require (
+	github.com/alexedwards/argon2id v1.0.0
 	github.com/distributed-programming-2026/go-sdk/pkg/amqp v0.0.3
 	github.com/distributed-programming-2026/go-sdk/pkg/event v0.0.3
 	github.com/distributed-programming-2026/go-sdk/pkg/logging v0.0.3
@@ -21,6 +22,8 @@ require (
 	golang.org/x/sync v0.22.0
 	google.golang.org/grpc v1.84.0
 	google.golang.org/protobuf v1.36.12
+	identity v0.0.0
+	session v0.0.0
 )
 
 require (
@@ -28,7 +31,6 @@ require (
 	filippo.io/edwards25519 v1.2.0 // indirect
 	github.com/Azure/go-ansiterm v0.0.0-20250102033503-faa5f7b0171c // indirect
 	github.com/Microsoft/go-winio v0.6.2 // indirect
-	github.com/alexedwards/argon2id v1.0.0 // indirect
 	github.com/cenkalti/backoff/v4 v4.3.0 // indirect
 	github.com/cespare/xxhash/v2 v2.3.0 // indirect
 	github.com/containerd/errdefs v1.0.0 // indirect
@@ -87,3 +89,7 @@ require (
 )
 
 replace github.com/distributed-programming-2026/lib => ../../lib
+
+replace identity => ../identity
+
+replace session => ../session

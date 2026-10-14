@@ -1,7 +1,5 @@
 package session
 
-package session
-
 import (
 	"context"
 	"fmt"
@@ -58,7 +56,7 @@ func (c *Client) Resolve(ctx context.Context, token string) (uuid.UUID, error) {
 	return userID, nil
 }
 
-func (c *Client) RevokeByToken(ctx context.Context, token string) error {
+func (c *Client) RevokeSession(ctx context.Context, token string) error {
 	_, err := c.client.RevokeSession(ctx, &sessionapi.RevokeSessionRequest{
 		Token: token,
 	})
