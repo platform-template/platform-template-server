@@ -35,10 +35,14 @@ func (c *Client) Create(ctx context.Context, firstName, lastName, middleName, lo
 		Email:      email,
 	})
 	if err != nil {
-		if status.Code(err) == codes.AlreadyExists {
+		switch status.Code(err) {
+		case codes.AlreadyExists:
 			return uuid.Nil(), fmt.Errorf("identity create user: %w", app.ErrLoginAlreadyExists)
+		case codes.InvalidArgument:
+			return uuid.Nil(), fmt.Errorf("identity create user: %w", app.ErrInvalidUserData)
+		default:
+			return uuid.Nil(), fmt.Errorf("identity create user: %w", err)
 		}
-		return uuid.Nil(), fmt.Errorf("identity create user: %w", err)
 	}
 
 	userID, err := uuid.Parse(resp.GetUserId())

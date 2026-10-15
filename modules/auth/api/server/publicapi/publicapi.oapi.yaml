@@ -23,7 +23,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/registerResponse"
+                $ref: "#/components/schemas/registerResponseData"
         "400":
           description: Invalid user data
         "409":
@@ -132,7 +132,7 @@ components:
           type: string
           minLength: 8
 
-    registerResponse:
+    registerResponseData:
       type: object
       required:
         - userId

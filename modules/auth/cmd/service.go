@@ -61,17 +61,9 @@ func service(ctx context.Context, logger *slog.Logger, conf config.Env) (err err
 		return err
 	}
 
-	grpcServer, err := newGRPCServer(logger, conf, svc)
-	if err != nil {
-		return err
-	}
-
 	errGroup, egCtx := errgroup.WithContext(ctx)
 	errGroup.Go(func() error {
 		return httpServer.Serve(egCtx)
-	})
-	errGroup.Go(func() error {
-		return grpcServer.Serve(egCtx)
 	})
 	errGroup.Go(func() error {
 		return runRelay(egCtx, logger, relay, conf.Relay)
