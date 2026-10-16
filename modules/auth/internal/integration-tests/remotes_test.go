@@ -201,14 +201,6 @@ func (s *sessionDouble) sessionCount() int {
 	return len(s.sessions)
 }
 
-func (s *sessionDouble) create(userID string) string {
-	response, _ := s.CreateSession(
-		context.Background(),
-		&sessionapi.CreateSessionRequest{UserId: userID},
-	)
-	return response.GetToken()
-}
-
 func (s *sessionDouble) active(token string) bool {
 	s.mu.Lock()
 	defer s.mu.Unlock()
