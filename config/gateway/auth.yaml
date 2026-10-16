@@ -1,0 +1,6 @@
+kind: gateway/service/v1
+name: auth
+routes:
+  - pattern: '^/api/public/v1/auth/(register|login|logout|change-password)$'
+    allowedMethods: [POST]
+    target: auth-service:8082

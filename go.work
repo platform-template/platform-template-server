@@ -2,6 +2,7 @@ go 1.27.1
 
 use (
 	./modules/auth
+	./modules/gateway
 	./modules/identity
 	./modules/session
 	lib

@@ -1,4 +1,16 @@
 services:
+  gateway:
+    image: distributed-programming-gateway:local
+    build:
+      context: ./modules/gateway
+      dockerfile: Dockerfile
+    command: ["--config", "/config"]
+    volumes:
+      - ./config/gateway:/config:ro
+    ports:
+      - "${GATEWAY_HTTP_PORT:-8080}:8000"
+      - "${GATEWAY_HEALTH_PORT:-15000}:15000"
+
   mysql:
     image: mysql:8.4
     environment:

@@ -1,0 +1,3 @@
+[submodule "modules/gateway"]
+	path = modules/gateway
+	url = https://github.com/distributed-programming-2026/gateway.git
