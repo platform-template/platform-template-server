@@ -14,7 +14,6 @@ import (
 
 	"github.com/distributed-programming-2026/go-sdk/pkg/mysql"
 	mysqldriver "github.com/go-sql-driver/mysql"
-	"github.com/kelseyhightower/envconfig"
 	"github.com/testcontainers/testcontainers-go"
 	tcmysql "github.com/testcontainers/testcontainers-go/modules/mysql"
 	"github.com/testcontainers/testcontainers-go/network"
@@ -32,6 +31,7 @@ type environment struct {
 	connector mysql.Connector
 	network   *testcontainers.DockerNetwork
 	logs      logBuffer
+	remotes   *remoteServices
 	closers   []func() error
 }
 
@@ -64,11 +64,9 @@ func runTests(m *testing.M) (exitCode int) {
 }
 
 func (e *environment) prepare(ctx context.Context) error {
-	err := envconfig.Process("integration_defaults", &e.conf)
-	if err != nil {
-		return err
-	}
+	e.conf = integrationConfig()
 
+	var err error
 	e.network, err = network.New(ctx)
 	if err != nil {
 		return err
@@ -107,6 +105,14 @@ func (e *environment) prepare(ctx context.Context) error {
 	e.conf.MySQL.User = databaseConfig.User
 	e.conf.MySQL.Password = databaseConfig.Passwd
 
+	e.remotes, err = startRemoteServices()
+	if err != nil {
+		return err
+	}
+	e.closers = append(e.closers, e.remotes.Close)
+	e.conf.Identity.Address = e.remotes.identityAddress
+	e.conf.Session.Address = e.remotes.sessionAddress
+
 	err = e.startBroker(ctx)
 	if err != nil {
 		return err
@@ -120,10 +126,6 @@ func (e *environment) prepare(ctx context.Context) error {
 		return err
 	}
 	e.closers = append(e.closers, e.connector.Close)
-
-	e.conf.App.GraceTimeout = time.Second
-	e.conf.Relay.Interval = 50 * time.Millisecond
-	e.conf.Relay.PublishTimeout = time.Second
 
 	_, err = e.startApplication(ctx, "message-handler")
 	if err != nil {
@@ -139,6 +141,21 @@ func (e *environment) prepare(ctx context.Context) error {
 	}
 	e.conf.GRPC.Address, err = containerAddress(ctx, service, "8081/tcp")
 	return err
+}
+
+func integrationConfig() config.Env {
+	return config.Env{
+		App: config.App{
+			GraceTimeout: time.Second,
+		},
+		AMQP: config.AMQP{
+			Queue: moduleID + ".echo",
+		},
+		Relay: config.Relay{
+			Interval:       50 * time.Millisecond,
+			PublishTimeout: time.Second,
+		},
+	}
 }
 
 func (e *environment) startBroker(ctx context.Context) error {
@@ -179,6 +196,10 @@ func (e *environment) startApplication(ctx context.Context, command string) (tes
 		Cmd:          []string{command},
 		ExposedPorts: []string{"8081/tcp", "8082/tcp"},
 		Networks:     []string{e.network.Name},
+		HostAccessPorts: []int{
+			e.remotes.identityPort,
+			e.remotes.sessionPort,
+		},
 		Env: map[string]string{
 			prefix + "MYSQL_ADDRESS":         "mysql:3306",
 			prefix + "MYSQL_DATABASE":        e.conf.MySQL.Database,
@@ -188,6 +209,8 @@ func (e *environment) startApplication(ctx context.Context, command string) (tes
 			prefix + "AMQP_QUEUE":            e.conf.AMQP.Queue,
 			prefix + "HTTP_ADDRESS":          ":8082",
 			prefix + "GRPC_ADDRESS":          ":8081",
+			prefix + "IDENTITY_ADDRESS":      e.conf.Identity.Address,
+			prefix + "SESSION_ADDRESS":       e.conf.Session.Address,
 			prefix + "APP_GRACE_TIMEOUT":     e.conf.App.GraceTimeout.String(),
 			prefix + "RELAY_INTERVAL":        e.conf.Relay.Interval.String(),
 			prefix + "RELAY_PUBLISH_TIMEOUT": e.conf.Relay.PublishTimeout.String(),

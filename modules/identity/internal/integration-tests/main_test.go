@@ -14,7 +14,6 @@ import (
 
 	"github.com/distributed-programming-2026/go-sdk/pkg/mysql"
 	mysqldriver "github.com/go-sql-driver/mysql"
-	"github.com/kelseyhightower/envconfig"
 	"github.com/testcontainers/testcontainers-go"
 	tcmysql "github.com/testcontainers/testcontainers-go/modules/mysql"
 	"github.com/testcontainers/testcontainers-go/network"
@@ -64,11 +63,9 @@ func runTests(m *testing.M) (exitCode int) {
 }
 
 func (e *environment) prepare(ctx context.Context) error {
-	err := envconfig.Process("integration_defaults", &e.conf)
-	if err != nil {
-		return err
-	}
+	e.conf = integrationConfig()
 
+	var err error
 	e.network, err = network.New(ctx)
 	if err != nil {
 		return err
@@ -121,10 +118,6 @@ func (e *environment) prepare(ctx context.Context) error {
 	}
 	e.closers = append(e.closers, e.connector.Close)
 
-	e.conf.App.GraceTimeout = time.Second
-	e.conf.Relay.Interval = 50 * time.Millisecond
-	e.conf.Relay.PublishTimeout = time.Second
-
 	_, err = e.startApplication(ctx, "message-handler")
 	if err != nil {
 		return err
@@ -139,6 +132,21 @@ func (e *environment) prepare(ctx context.Context) error {
 	}
 	e.conf.GRPC.Address, err = containerAddress(ctx, service, "8081/tcp")
 	return err
+}
+
+func integrationConfig() config.Env {
+	return config.Env{
+		App: config.App{
+			GraceTimeout: time.Second,
+		},
+		AMQP: config.AMQP{
+			Queue: moduleID + ".echo",
+		},
+		Relay: config.Relay{
+			Interval:       50 * time.Millisecond,
+			PublishTimeout: time.Second,
+		},
+	}
 }
 
 func (e *environment) startBroker(ctx context.Context) error {

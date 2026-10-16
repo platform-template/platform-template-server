@@ -1,83 +1,179 @@
 package integration_tests
 
 import (
-	"context"
-	"io"
-	"log/slog"
+	"bytes"
+	"encoding/json"
 	"net/http"
-	"strings"
 	"testing"
 	"time"
 
-	"github.com/distributed-programming-2026/go-sdk/pkg/amqp"
-	eventamqp "github.com/distributed-programming-2026/go-sdk/pkg/event/amqp"
 	"github.com/stretchr/testify/require"
-	"google.golang.org/grpc"
-	"google.golang.org/grpc/credentials/insecure"
-
-	domainevent "github.com/distributed-programming-2026/lib/event"
-
-	internalapi "auth/api/server/internalapi"
-	publicapi "auth/api/server/publicapi"
 )
 
-func TestHTTPAndGRPCDelivery(t *testing.T) {
-	client, err := publicapi.NewClientWithResponses("http://" + testEnv.conf.HTTP.Address)
-	require.NoError(t, err)
+const authAPIPath = "/api/public/v1/auth"
 
-	response, err := client.EchoWithResponse(t.Context(), publicapi.EchoJSONRequestBody{
-		Body: "HTTP привет",
-	})
-	require.NoError(t, err)
-	require.Equal(t, http.StatusOK, response.StatusCode())
-	require.NotNil(t, response.JSON200)
-	envelope := checkEcho(t, response.JSON200.OperationID, "HTTP привет")
-	waitHandled(t, envelope, 1)
-
-	connection, err := grpc.NewClient(testEnv.conf.GRPC.Address, grpc.WithTransportCredentials(insecure.NewCredentials()))
-	require.NoError(t, err)
-	defer connection.Close()
-
-	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
-	defer cancel()
-
-	grpcResponse, err := internalapi.NewAuthServiceClient(connection).Echo(ctx, &internalapi.EchoRequest{
-		Body: "gRPC echo",
-	}, grpc.WaitForReady(true))
-	require.NoError(t, err)
-	waitHandled(t, checkEcho(t, grpcResponse.OperationID, "gRPC echo"), 1)
-
-	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
-	duplicateConnection := amqp.NewConnection(moduleID, amqp.ConnectionConfig{
-		URL:            testEnv.conf.AMQP.URL,
-		ConnectTimeout: time.Second,
-	}, logger)
-	defer func() {
-		require.NoError(t, duplicateConnection.Stop())
-	}()
-
-	dispatcher, err := eventamqp.NewDispatcher(duplicateConnection.Producer(domainevent.DomainExchange(), nil, nil))
-	require.NoError(t, err)
-	require.NoError(t, duplicateConnection.Start())
-	require.NoError(t, dispatcher.Dispatch(t.Context(), envelope))
-	waitHandled(t, envelope, 2)
-	require.Equal(t, 1, testEnv.logs.count("echo received", "echo_id", response.JSON200.OperationID))
+type registerResponse struct {
+	UserID string `json:"userId"`
 }
 
-func TestInvalidHTTPRequests(t *testing.T) {
-	client := &http.Client{
-		Timeout: time.Second,
-	}
-	for _, body := range []string{`{}`, `{"body":42}`, `null`, `{"body":`} {
-		request, err := http.NewRequestWithContext(t.Context(), http.MethodPost,
-			"http://"+testEnv.conf.HTTP.Address+"/api/public/v1/echo", strings.NewReader(body),
-		)
+func authRequest(t *testing.T, path string, body any, cookie *http.Cookie) *http.Response {
+	t.Helper()
+	var payload []byte
+	var err error
+	if body != nil {
+		payload, err = json.Marshal(body)
 		require.NoError(t, err)
+	}
+	request, err := http.NewRequestWithContext(t.Context(), http.MethodPost, "http://"+testEnv.conf.HTTP.Address+path, bytes.NewReader(payload))
+	require.NoError(t, err)
+	if body != nil {
 		request.Header.Set("Content-Type", "application/json")
-
-		response, err := client.Do(request)
-		require.NoError(t, err)
-		require.NoError(t, response.Body.Close())
-		require.Equal(t, http.StatusBadRequest, response.StatusCode)
 	}
+	if cookie != nil {
+		request.AddCookie(cookie)
+	}
+	response, err := (&http.Client{Timeout: 10 * time.Second}).Do(request)
+	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, response.Body.Close()) })
+	return response
+}
+
+func registerUser(t *testing.T, login, password string) string {
+	t.Helper()
+	response := authRequest(t, authAPIPath+"/register", map[string]string{
+		"firstName": "Ada",
+		"lastName":  "Lovelace",
+		"login":     login,
+		"email":     login + "@example.com",
+		"password":  password,
+	}, nil)
+	require.Equal(t, http.StatusCreated, response.StatusCode)
+	var result registerResponse
+	require.NoError(t, json.NewDecoder(response.Body).Decode(&result))
+	require.NotEmpty(t, result.UserID)
+	return result.UserID
+}
+
+func login(t *testing.T, login, password string) *http.Cookie {
+	t.Helper()
+	response := authRequest(t, authAPIPath+"/login", map[string]string{
+		"login":    login,
+		"password": password,
+	}, nil)
+	require.Equal(t, http.StatusNoContent, response.StatusCode)
+	cookies := response.Cookies()
+	require.Len(t, cookies, 1)
+	require.Equal(t, "session", cookies[0].Name)
+	require.True(t, cookies[0].HttpOnly)
+	return cookies[0]
+}
+
+func TestAuthHTTPRegisterAndLogin(t *testing.T) {
+	userID := registerUser(t, "auth-register", "password-1")
+	var passwordHash string
+	err := testEnv.connector.TransactionalClient().GetContext(t.Context(), "test.auth.credentials", &passwordHash, `
+SELECT password_hash FROM password_credentials WHERE user_id = ?`, userID)
+	require.NoError(t, err)
+	require.NotEmpty(t, passwordHash)
+
+	response := authRequest(t, authAPIPath+"/register", map[string]string{
+		"firstName": "Ada",
+		"lastName":  "Lovelace",
+		"login":     "auth-register",
+		"email":     "second@example.com",
+		"password":  "password-1",
+	}, nil)
+	require.Equal(t, http.StatusConflict, response.StatusCode)
+
+	response = authRequest(t, authAPIPath+"/register", map[string]string{
+		"firstName": "Ada",
+		"lastName":  "Lovelace",
+		"login":     "invalid-email",
+		"email":     "not-an-email",
+		"password":  "password-1",
+	}, nil)
+	require.Equal(t, http.StatusBadRequest, response.StatusCode)
+
+	before := testEnv.remotes.session.sessionCount()
+	response = authRequest(t, authAPIPath+"/login", map[string]string{
+		"login":    "auth-register",
+		"password": "wrong-password",
+	}, nil)
+	require.Equal(t, http.StatusUnauthorized, response.StatusCode)
+	require.Equal(t, before, testEnv.remotes.session.sessionCount())
+
+	response = authRequest(t, authAPIPath+"/login", map[string]string{
+		"login":    "absent-user",
+		"password": "password-1",
+	}, nil)
+	require.Equal(t, http.StatusUnauthorized, response.StatusCode)
+	require.Equal(t, before, testEnv.remotes.session.sessionCount())
+
+	_ = login(t, "auth-register", "password-1")
+}
+
+func TestAuthHTTPLogout(t *testing.T) {
+	registerUser(t, "auth-logout", "password-1")
+	cookie := login(t, "auth-logout", "password-1")
+	response := authRequest(t, authAPIPath+"/logout", nil, cookie)
+	require.Equal(t, http.StatusNoContent, response.StatusCode)
+	require.False(t, testEnv.remotes.session.active(cookie.Value))
+	cleared := response.Cookies()
+	require.Len(t, cleared, 1)
+	require.Empty(t, cleared[0].Value)
+	require.Negative(t, cleared[0].MaxAge)
+
+	response = authRequest(t, authAPIPath+"/logout", nil, cookie)
+	require.Equal(t, http.StatusNoContent, response.StatusCode)
+	response = authRequest(t, authAPIPath+"/logout", nil, nil)
+	require.Equal(t, http.StatusBadRequest, response.StatusCode)
+}
+
+func TestAuthHTTPChangePassword(t *testing.T) {
+	registerUser(t, "auth-password", "password-1")
+	current := login(t, "auth-password", "password-1")
+	other := login(t, "auth-password", "password-1")
+
+	response := authRequest(t, authAPIPath+"/change-password", map[string]string{
+		"oldPassword": "password-1",
+		"newPassword": "password-2",
+	}, current)
+	require.Equal(t, http.StatusNoContent, response.StatusCode)
+	require.True(t, testEnv.remotes.session.active(current.Value))
+	require.False(t, testEnv.remotes.session.active(other.Value))
+
+	before := testEnv.remotes.session.sessionCount()
+	response = authRequest(t, authAPIPath+"/login", map[string]string{
+		"login":    "auth-password",
+		"password": "password-1",
+	}, nil)
+	require.Equal(t, http.StatusUnauthorized, response.StatusCode)
+	require.Equal(t, before, testEnv.remotes.session.sessionCount())
+	_ = login(t, "auth-password", "password-2")
+
+	response = authRequest(t, authAPIPath+"/change-password", map[string]string{
+		"oldPassword": "password-2",
+		"newPassword": "password-3",
+	}, nil)
+	require.Equal(t, http.StatusUnauthorized, response.StatusCode)
+
+	response = authRequest(t, authAPIPath+"/change-password", map[string]string{
+		"oldPassword": "password-2",
+		"newPassword": "password-3",
+	}, &http.Cookie{Name: "session", Value: "revoked"})
+	require.Equal(t, http.StatusUnauthorized, response.StatusCode)
+
+	valid := login(t, "auth-password", "password-2")
+	response = authRequest(t, authAPIPath+"/change-password", map[string]string{
+		"oldPassword": "wrong-password",
+		"newPassword": "password-3",
+	}, valid)
+	require.Equal(t, http.StatusUnauthorized, response.StatusCode)
+	_ = login(t, "auth-password", "password-2")
+
+	response = authRequest(t, authAPIPath+"/change-password", map[string]string{
+		"oldPassword": "password-2",
+		"newPassword": "password-2",
+	}, valid)
+	require.Equal(t, http.StatusConflict, response.StatusCode)
 }

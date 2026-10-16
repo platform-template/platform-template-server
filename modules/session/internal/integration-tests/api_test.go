@@ -1,83 +1,89 @@
 package integration_tests
 
 import (
-	"context"
-	"io"
-	"log/slog"
-	"net/http"
-	"strings"
 	"testing"
 	"time"
 
-	"github.com/distributed-programming-2026/go-sdk/pkg/amqp"
-	eventamqp "github.com/distributed-programming-2026/go-sdk/pkg/event/amqp"
 	"github.com/stretchr/testify/require"
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/credentials/insecure"
+	"google.golang.org/grpc/status"
+	"uuid"
 
-	domainevent "github.com/distributed-programming-2026/lib/event"
-
-	internalapi "session/api/server/internalapi"
-	publicapi "session/api/server/publicapi"
+	sessionapi "session/api/server/internalapi"
+	"session/internal/session/domain"
 )
 
-func TestHTTPAndGRPCDelivery(t *testing.T) {
-	client, err := publicapi.NewClientWithResponses("http://" + testEnv.conf.HTTP.Address)
-	require.NoError(t, err)
-
-	response, err := client.EchoWithResponse(t.Context(), publicapi.EchoJSONRequestBody{
-		Body: "HTTP привет",
-	})
-	require.NoError(t, err)
-	require.Equal(t, http.StatusOK, response.StatusCode())
-	require.NotNil(t, response.JSON200)
-	envelope := checkEcho(t, response.JSON200.OperationID, "HTTP привет")
-	waitHandled(t, envelope, 1)
-
+func sessionClient(t *testing.T) sessionapi.SessionServiceClient {
+	t.Helper()
 	connection, err := grpc.NewClient(testEnv.conf.GRPC.Address, grpc.WithTransportCredentials(insecure.NewCredentials()))
 	require.NoError(t, err)
-	defer connection.Close()
-
-	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
-	defer cancel()
-
-	grpcResponse, err := internalapi.NewSessionServiceClient(connection).Echo(ctx, &internalapi.EchoRequest{
-		Body: "gRPC echo",
-	}, grpc.WaitForReady(true))
-	require.NoError(t, err)
-	waitHandled(t, checkEcho(t, grpcResponse.OperationID, "gRPC echo"), 1)
-
-	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
-	duplicateConnection := amqp.NewConnection(moduleID, amqp.ConnectionConfig{
-		URL:            testEnv.conf.AMQP.URL,
-		ConnectTimeout: time.Second,
-	}, logger)
-	defer func() {
-		require.NoError(t, duplicateConnection.Stop())
-	}()
-
-	dispatcher, err := eventamqp.NewDispatcher(duplicateConnection.Producer(domainevent.DomainExchange(), nil, nil))
-	require.NoError(t, err)
-	require.NoError(t, duplicateConnection.Start())
-	require.NoError(t, dispatcher.Dispatch(t.Context(), envelope))
-	waitHandled(t, envelope, 2)
-	require.Equal(t, 1, testEnv.logs.count("echo received", "echo_id", response.JSON200.OperationID))
+	t.Cleanup(func() { require.NoError(t, connection.Close()) })
+	return sessionapi.NewSessionServiceClient(connection)
 }
 
-func TestInvalidHTTPRequests(t *testing.T) {
-	client := &http.Client{
-		Timeout: time.Second,
-	}
-	for _, body := range []string{`{}`, `{"body":42}`, `null`, `{"body":`} {
-		request, err := http.NewRequestWithContext(t.Context(), http.MethodPost,
-			"http://"+testEnv.conf.HTTP.Address+"/api/public/v1/echo", strings.NewReader(body),
-		)
-		require.NoError(t, err)
-		request.Header.Set("Content-Type", "application/json")
+func resolveSession(t *testing.T, client sessionapi.SessionServiceClient, token string) string {
+	t.Helper()
+	response, err := client.ResolveSession(t.Context(), &sessionapi.ResolveSessionRequest{Token: token})
+	require.NoError(t, err)
+	return response.GetUserId()
+}
 
-		response, err := client.Do(request)
-		require.NoError(t, err)
-		require.NoError(t, response.Body.Close())
-		require.Equal(t, http.StatusBadRequest, response.StatusCode)
-	}
+func TestSessionGRPCCreateResolveAndStoreHash(t *testing.T) {
+	client := sessionClient(t)
+	userID := uuid.New().String()
+	response, err := client.CreateSession(t.Context(), &sessionapi.CreateSessionRequest{UserId: userID})
+	require.NoError(t, err)
+	require.NotEmpty(t, response.GetToken())
+	require.Equal(t, userID, resolveSession(t, client, response.GetToken()))
+
+	var storedHash string
+	err = testEnv.connector.TransactionalClient().GetContext(t.Context(), "test.session.hash", &storedHash, `
+SELECT token_hash FROM sessions WHERE user_id = ?`, userID)
+	require.NoError(t, err)
+	require.Equal(t, string(domain.HashSessionToken(domain.SessionToken(response.GetToken()))), storedHash)
+	require.NotEqual(t, response.GetToken(), storedHash)
+}
+
+func TestSessionGRPCRejectsUnknownAndExpiredTokens(t *testing.T) {
+	client := sessionClient(t)
+	_, err := client.ResolveSession(t.Context(), &sessionapi.ResolveSessionRequest{Token: ""})
+	require.Equal(t, codes.InvalidArgument, status.Code(err))
+
+	_, err = client.ResolveSession(t.Context(), &sessionapi.ResolveSessionRequest{Token: "unknown"})
+	require.Equal(t, codes.Unauthenticated, status.Code(err))
+
+	userID := uuid.New().String()
+	created, err := client.CreateSession(t.Context(), &sessionapi.CreateSessionRequest{UserId: userID})
+	require.NoError(t, err)
+	_, err = testEnv.connector.TransactionalClient().ExecContext(t.Context(), "test.session.expire", `
+UPDATE sessions SET expires_at = ? WHERE token_hash = ?`, time.Now().UTC().Add(-time.Second), domain.HashSessionToken(domain.SessionToken(created.GetToken())))
+	require.NoError(t, err)
+	_, err = client.ResolveSession(t.Context(), &sessionapi.ResolveSessionRequest{Token: created.GetToken()})
+	require.Equal(t, codes.Unauthenticated, status.Code(err))
+}
+
+func TestSessionGRPCRevocation(t *testing.T) {
+	client := sessionClient(t)
+	userID := uuid.New().String()
+	otherUserID := uuid.New().String()
+	current, err := client.CreateSession(t.Context(), &sessionapi.CreateSessionRequest{UserId: userID})
+	require.NoError(t, err)
+	other, err := client.CreateSession(t.Context(), &sessionapi.CreateSessionRequest{UserId: userID})
+	require.NoError(t, err)
+	foreign, err := client.CreateSession(t.Context(), &sessionapi.CreateSessionRequest{UserId: otherUserID})
+	require.NoError(t, err)
+
+	_, err = client.RevokeOthersByUserID(t.Context(), &sessionapi.RevokeOthersByUserIDRequest{UserId: userID, Token: current.GetToken()})
+	require.NoError(t, err)
+	require.Equal(t, userID, resolveSession(t, client, current.GetToken()))
+	_, err = client.ResolveSession(t.Context(), &sessionapi.ResolveSessionRequest{Token: other.GetToken()})
+	require.Equal(t, codes.Unauthenticated, status.Code(err))
+	require.Equal(t, otherUserID, resolveSession(t, client, foreign.GetToken()))
+
+	_, err = client.RevokeSession(t.Context(), &sessionapi.RevokeSessionRequest{Token: current.GetToken()})
+	require.NoError(t, err)
+	_, err = client.ResolveSession(t.Context(), &sessionapi.ResolveSessionRequest{Token: current.GetToken()})
+	require.Equal(t, codes.Unauthenticated, status.Code(err))
 }
