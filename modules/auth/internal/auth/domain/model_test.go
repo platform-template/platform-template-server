@@ -73,14 +73,14 @@ func TestPasswordCredential_ChangePasswordHash(t *testing.T) {
 		wantErr  error
 	}{
 		{
-			name:     "success",
-			newHash:  "new-hash",
-			wantHash: "new-hash",
+			name:     testCaseSuccess,
+			newHash:  testNewHash,
+			wantHash: testNewHash,
 		},
 		{
 			name:     "empty hash",
 			newHash:  "",
-			wantHash: "old-hash",
+			wantHash: testOldHash,
 			wantErr:  ErrInvalidPasswordHash,
 		},
 	}
@@ -89,7 +89,7 @@ func TestPasswordCredential_ChangePasswordHash(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			credential := &PasswordCredential{
 				userID:       uuid.New(),
-				passwordHash: "old-hash",
+				passwordHash: testOldHash,
 			}
 
 			err := credential.changePasswordHash(tt.newHash)

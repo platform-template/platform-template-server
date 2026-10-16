@@ -5,6 +5,11 @@ import (
 	"testing"
 )
 
+const (
+	validUnicodePassword = "пароль12" //nolint:gosec
+	shortUnicodePassword = "привет"   //nolint:gosec
+)
+
 func TestValidatePassword(t *testing.T) {
 	tests := []struct {
 		name     string
@@ -21,7 +26,7 @@ func TestValidatePassword(t *testing.T) {
 		},
 		{
 			name:     "unicode password",
-			password: "пароль12",
+			password: validUnicodePassword,
 		},
 		{
 			name:     "too short",
@@ -35,7 +40,7 @@ func TestValidatePassword(t *testing.T) {
 		},
 		{
 			name:     "short unicode password",
-			password: "привет",
+			password: shortUnicodePassword,
 			wantErr:  ErrInvalidPassword,
 		},
 	}

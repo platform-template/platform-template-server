@@ -70,8 +70,8 @@ func TestAuthService_Create(t *testing.T) {
 		wantErr  error
 	}{
 		{
-			name:     "success",
-			password: "secure-password",
+			name:     testCaseSuccess,
+			password: testPassword,
 		},
 		{
 			name:     "invalid password",
@@ -80,13 +80,13 @@ func TestAuthService_Create(t *testing.T) {
 		},
 		{
 			name:     "credential exists",
-			password: "secure-password",
+			password: testPassword,
 			existing: true,
 			wantErr:  ErrCredentialAlreadyExists,
 		},
 		{
 			name:     "store error",
-			password: "secure-password",
+			password: testPassword,
 			storeErr: storeErr,
 			wantErr:  storeErr,
 		},
@@ -99,7 +99,7 @@ func TestAuthService_Create(t *testing.T) {
 			if tt.existing {
 				repo.credential = &PasswordCredential{
 					userID:       userID,
-					passwordHash: "old-hash",
+					passwordHash: testOldHash,
 				}
 			}
 			hasher := &fakePasswordHasher{hashResult: "created-hash"}
@@ -190,7 +190,7 @@ func TestAuthService_ChangePassword(t *testing.T) {
 		wantErr     error
 	}{
 		{
-			name: "success",
+			name: testCaseSuccess,
 		},
 		{
 			name:        "password unchanged",
@@ -216,11 +216,11 @@ func TestAuthService_ChangePassword(t *testing.T) {
 			if !tt.missing {
 				repo.credential = &PasswordCredential{
 					userID:       userID,
-					passwordHash: "old-hash",
+					passwordHash: testOldHash,
 				}
 			}
 			hasher := &fakePasswordHasher{
-				hashResult:   "new-hash",
+				hashResult:   testNewHash,
 				verifyResult: tt.verifyMatch,
 			}
 			service := NewAuthService(repo, hasher)
@@ -234,7 +234,7 @@ func TestAuthService_ChangePassword(t *testing.T) {
 				if repo.changeCalls != 0 || hasher.hashCalls != 0 {
 					t.Error("unchanged password must not be rehashed or saved")
 				}
-				if repo.credential.passwordHash != "old-hash" {
+				if repo.credential.passwordHash != testOldHash {
 					t.Error("old hash should be preserved")
 				}
 			}
@@ -242,10 +242,10 @@ func TestAuthService_ChangePassword(t *testing.T) {
 			if tt.wantErr != nil {
 				return
 			}
-			if repo.changed == nil || repo.changed.passwordHash != "new-hash" {
+			if repo.changed == nil || repo.changed.passwordHash != testNewHash {
 				t.Error("new password hash was not saved")
 			}
-			if hasher.verifiedPassword != "new-password-123" || hasher.verifiedHash != "old-hash" {
+			if hasher.verifiedPassword != "new-password-123" || hasher.verifiedHash != testOldHash {
 				t.Error("Verify must compare new password with old hash")
 			}
 		})
