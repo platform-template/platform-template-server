@@ -127,10 +127,6 @@ func (e *environment) prepare(ctx context.Context) error {
 	}
 	e.closers = append(e.closers, e.connector.Close)
 
-	_, err = e.startApplication(ctx, "message-handler")
-	if err != nil {
-		return err
-	}
 	service, err := e.startApplication(ctx, "service")
 	if err != nil {
 		return err

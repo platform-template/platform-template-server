@@ -1,9 +1,0 @@
-syntax = "proto3";
-package authEvents;
-
-option go_package = "/.;authevents";
-
-message Echo {
-  string ID = 1;
-  string Body = 2;
-}

@@ -69,7 +69,6 @@ func (a *application) command() *cli.Command {
 		},
 		Commands: []*cli.Command{
 			a.serviceCmd(),
-			a.messageHandlerCmd(),
 		},
 	}
 }
