@@ -30,7 +30,7 @@ func TestNewEmail(t *testing.T) {
 		},
 		{
 			name:    "only spaces",
-			input:   "   ",
+			input:   testWhitespace,
 			wantErr: ErrInvalidEmail,
 		},
 		{
@@ -91,34 +91,34 @@ func TestNewUserValidatesRequiredFields(t *testing.T) {
 		},
 		{
 			name:      "missing ID",
-			firstName: "Ada",
-			lastName:  "Lovelace",
-			login:     "ada",
-			email:     "ada@example.com",
+			firstName: testFirstName,
+			lastName:  testLastName,
+			login:     testLogin,
+			email:     testEmail,
 			wantErr:   ErrInvalidUserID,
 		},
 		{
 			name:     "missing first name",
 			id:       uuid.New(),
-			lastName: "Lovelace",
-			login:    "ada",
-			email:    "ada@example.com",
+			lastName: testLastName,
+			login:    testLogin,
+			email:    testEmail,
 			wantErr:  ErrInvalidFirstName,
 		},
 		{
 			name:      "missing last name",
 			id:        uuid.New(),
-			firstName: "Ada",
-			login:     "ada",
-			email:     "ada@example.com",
+			firstName: testFirstName,
+			login:     testLogin,
+			email:     testEmail,
 			wantErr:   ErrInvalidLastName,
 		},
 		{
 			name:      "missing login",
 			id:        uuid.New(),
-			firstName: "Ada",
-			lastName:  "Lovelace",
-			email:     "ada@example.com",
+			firstName: testFirstName,
+			lastName:  testLastName,
+			email:     testEmail,
 			wantErr:   ErrInvalidLogin,
 		},
 	}
@@ -135,7 +135,7 @@ func TestNewUserValidatesRequiredFields(t *testing.T) {
 			if !errors.Is(err, tt.wantErr) {
 				t.Fatalf("expected %v, got %v", tt.wantErr, err)
 			}
-			if tt.wantErr == nil && (user.Data().FirstName != "Ada" || user.Data().Login != "ada") {
+			if tt.wantErr == nil && (user.Data().FirstName != testFirstName || user.Data().Login != testLogin) {
 				t.Fatal("user fields were not normalized")
 			}
 		})

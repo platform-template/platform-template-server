@@ -8,6 +8,8 @@ import (
 	"uuid"
 )
 
+const testToken = SessionToken("token")
+
 type fakeSessionRepository struct {
 	nextID                                        uuid.UUID
 	storeErr, findErr, revokeErr, revokeOthersErr error
@@ -68,7 +70,7 @@ func TestSessionServiceResolve(t *testing.T) {
 	}{
 		{
 			name:  "active session",
-			token: "token",
+			token: testToken,
 			session: &Session{
 				userID:    userID,
 				expiresAt: time.Now().Add(time.Hour),
@@ -77,12 +79,12 @@ func TestSessionServiceResolve(t *testing.T) {
 		},
 		{
 			name:    "unknown token",
-			token:   "token",
+			token:   testToken,
 			wantErr: ErrSessionNotFound,
 		},
 		{
 			name:  "expired session",
-			token: "token",
+			token: testToken,
 			session: &Session{
 				expiresAt: time.Now().Add(-time.Hour),
 			},

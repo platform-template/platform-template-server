@@ -69,8 +69,8 @@ func TestIdentityService_Create(t *testing.T) {
 			repo.findCalls, repo.nextIDCalls, repo.storeCalls)
 	}
 
-	if repo.foundLogin != "alex" {
-		t.Errorf("expected lookup login %q, got %q", "alex", repo.foundLogin)
+	if repo.foundLogin != testAlexLogin {
+		t.Errorf("expected lookup login %q, got %q", testAlexLogin, repo.foundLogin)
 	}
 
 	if repo.storedUser == nil {
@@ -87,8 +87,8 @@ func TestIdentityService_Create(t *testing.T) {
 		t.Errorf("unexpected stored name: %q %q %q", user.firstName, user.lastName, user.middleName)
 	}
 
-	if user.login != "alex" {
-		t.Errorf("expected stored login %q, got %q", "alex", user.login)
+	if user.login != testAlexLogin {
+		t.Errorf("expected stored login %q, got %q", testAlexLogin, user.login)
 	}
 
 	if user.email != Email("alex@example.com") {
@@ -109,7 +109,7 @@ func validCreateInput() createInput {
 		firstName:  "Alex",
 		lastName:   "Smith",
 		middleName: "",
-		login:      "alex",
+		login:      testAlexLogin,
 		email:      "alex@example.com",
 	}
 }
@@ -138,7 +138,7 @@ func TestIdentityService_Create_Errors(t *testing.T) {
 		{
 			name: "whitespace login",
 			modifyInput: func(i *createInput) {
-				i.login = "   "
+				i.login = testWhitespace
 			},
 			wantErr: ErrInvalidLogin,
 		},
@@ -188,7 +188,7 @@ func TestIdentityService_Create_Errors(t *testing.T) {
 		{
 			name: "empty last name",
 			modifyInput: func(i *createInput) {
-				i.lastName = "   "
+				i.lastName = testWhitespace
 			},
 			wantErr:    ErrInvalidLastName,
 			wantFind:   1,
@@ -256,7 +256,7 @@ func TestIdentityService_Create_Errors(t *testing.T) {
 }
 
 func TestIdentityService_FindByLogin(t *testing.T) {
-	existingUser := &User{login: "alex"}
+	existingUser := &User{login: testAlexLogin}
 	findErr := errors.New("find failed")
 
 	tests := []struct {
@@ -272,7 +272,7 @@ func TestIdentityService_FindByLogin(t *testing.T) {
 			name:      "user found",
 			login:     "  alex  ",
 			foundUser: existingUser,
-			wantLogin: "alex",
+			wantLogin: testAlexLogin,
 			wantCalls: 1,
 		},
 		{
@@ -282,7 +282,7 @@ func TestIdentityService_FindByLogin(t *testing.T) {
 		},
 		{
 			name:    "whitespace login",
-			login:   "   ",
+			login:   testWhitespace,
 			wantErr: ErrInvalidLogin,
 		},
 		{
@@ -294,10 +294,10 @@ func TestIdentityService_FindByLogin(t *testing.T) {
 		},
 		{
 			name:      "repository error",
-			login:     "alex",
+			login:     testAlexLogin,
 			repoErr:   findErr,
 			wantErr:   findErr,
-			wantLogin: "alex",
+			wantLogin: testAlexLogin,
 			wantCalls: 1,
 		},
 	}

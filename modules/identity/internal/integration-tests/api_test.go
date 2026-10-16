@@ -14,6 +14,8 @@ import (
 	identityapi "identity/api/server/internalapi"
 )
 
+const testUserLogin = "ada-lovelace"
+
 func identityClient(t *testing.T) identityapi.IdentityServiceClient {
 	t.Helper()
 	connection, err := grpc.NewClient(testEnv.conf.GRPC.Address, grpc.WithTransportCredentials(insecure.NewCredentials()))
@@ -31,7 +33,7 @@ func TestIdentityGRPCUserLifecycle(t *testing.T) {
 		FirstName:  "Ada",
 		LastName:   "Lovelace",
 		MiddleName: "Byron",
-		Login:      "ada-lovelace",
+		Login:      testUserLogin,
 		Email:      "ada@example.com",
 	})
 	require.NoError(t, err)
@@ -52,17 +54,17 @@ WHERE id = ?`, created.GetUserId())
 	require.Equal(t, "Ada", stored.FirstName)
 	require.Equal(t, "Lovelace", stored.LastName)
 	require.Equal(t, "Byron", stored.MiddleName)
-	require.Equal(t, "ada-lovelace", stored.Login)
+	require.Equal(t, testUserLogin, stored.Login)
 	require.Equal(t, "ada@example.com", stored.Email)
 
-	found, err := client.FindUserByLogin(ctx, &identityapi.FindUserByLoginRequest{Login: "ada-lovelace"})
+	found, err := client.FindUserByLogin(ctx, &identityapi.FindUserByLoginRequest{Login: testUserLogin})
 	require.NoError(t, err)
 	require.Equal(t, created.GetUserId(), found.GetUserId())
 
 	_, err = client.CreateUser(ctx, &identityapi.CreateUserRequest{
 		FirstName: "Another",
 		LastName:  "User",
-		Login:     "ada-lovelace",
+		Login:     testUserLogin,
 		Email:     "another@example.com",
 	})
 	require.Equal(t, codes.AlreadyExists, status.Code(err))
