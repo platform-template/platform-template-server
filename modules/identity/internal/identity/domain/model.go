@@ -36,7 +36,7 @@ type User struct {
 	id         uuid.UUID
 	firstName  string
 	lastName   string
-	middleName string
+	middleName string // TODO: указатель при пустоте (maybe?)
 	login      string
 	email      Email
 }

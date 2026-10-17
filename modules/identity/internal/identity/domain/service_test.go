@@ -40,7 +40,7 @@ func (f *fakeIdentityRepository) FindByLogin(login string) (*User, error) {
 
 var _ IdentityRepository = (*fakeIdentityRepository)(nil)
 
-func TestIdentityService_Create(t *testing.T) {
+func TestIdentityService_Create(t *testing.T) { // TODO: testify
 	expectedID := uuid.New()
 
 	repo := &fakeIdentityRepository{

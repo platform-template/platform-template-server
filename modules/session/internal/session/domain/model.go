@@ -24,7 +24,7 @@ type Session struct {
 type SessionData struct {
 	ID        uuid.UUID
 	UserID    uuid.UUID
-	TokenHash SessionTokenHash
+	TokenHash SessionTokenHash // TODO: хэш не нужен // device id
 	ExpiresAt time.Time
 }
 

@@ -17,7 +17,7 @@ import (
 	sessionapi "session/api/server/internalapi"
 )
 
-type remoteServices struct {
+type remoteServices struct { // TODO: double -> mock
 	identityAddress  string
 	sessionAddress   string
 	identityPort     int

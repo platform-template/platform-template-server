@@ -14,7 +14,7 @@ var (
 	ErrInvalidPasswordHash     = errors.New("invalid password hash")
 )
 
-type PasswordCredential struct {
+type PasswordCredential struct { // TODO: перенсти сюда login
 	userID       uuid.UUID
 	passwordHash string
 }
