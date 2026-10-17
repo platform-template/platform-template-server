@@ -91,7 +91,12 @@ func authRequest(t *testing.T, path string, body any, cookie *http.Cookie) httpR
 		payload, err = json.Marshal(body)
 		require.NoError(t, err)
 	}
-	request, err := http.NewRequestWithContext(t.Context(), http.MethodPost, "http://"+testEnv.conf.HTTP.Address+path, bytes.NewReader(payload))
+	request, err := http.NewRequestWithContext(
+		t.Context(),
+		http.MethodPost,
+		"http://"+testEnv.conf.HTTP.Address+path,
+		bytes.NewReader(payload),
+	)
 	require.NoError(t, err)
 	if body != nil {
 		request.Header.Set("Content-Type", "application/json")
