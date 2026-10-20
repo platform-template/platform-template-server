@@ -4,7 +4,6 @@
 import argparse
 import os
 from pathlib import Path
-import re
 import subprocess
 import sys
 
@@ -15,52 +14,18 @@ def main():
     parser.add_argument("--infra-only", action="store_true")
     args = parser.parse_args()
     root = Path(__file__).resolve().parent.parent
-    modules = sorted(
-        (path for path in root.glob("modules/*/compose.yaml") if not (path.parent / ".git").is_file()),
-        key=lambda path: (path.parent.name != "template", path.parent.name),
-    )
-    build_modules = sorted(
-        (
-            path.parent
-            for path in root.glob("modules/*/mise.toml")
-            if (path.parent / "go.mod").is_file() and "[tasks.build]" in path.read_text()
-        ),
-        key=lambda path: path.name,
-    )
+    modules = sorted(root.glob("modules/*/compose.yaml"), key=lambda path: (path.parent.name != "template", path.parent.name))
     env = dict(os.environ)
     used_ports = set()
-    root_compose = root / "compose.yaml"
-    port_pattern = re.compile(r"\$\{([A-Z][A-Z0-9_]*_PORT):-([0-9]+)\}")
-    root_ports = list(dict.fromkeys(port_pattern.findall(root_compose.read_text())))
-    module_ports = list(
-        dict.fromkeys(
-            port
-            for path in modules
-            for port in port_pattern.findall(path.read_text())
-        )
-    )
-
-    for key, default in root_ports + module_ports:
-        if key not in env:
-            continue
-        try:
-            port = int(env[key])
-        except ValueError:
-            sys.exit(f"Invalid local port: {key}={env[key]}")
-        if not 0 < port < 65536 or port in used_ports:
-            sys.exit(f"Invalid or duplicate local port: {key}={port}")
-        used_ports.add(port)
-
-    for key, default in root_ports:
+    keys = [f"{path.parent.name.upper()}_{kind}_PORT" for path in modules for kind in ["GRPC", "HTTP", "MESSAGE_HANDLER"]]
+    for key in keys:
         if key in env:
-            continue
-        port = int(default)
-        if not 0 < port < 65536 or port in used_ports:
-            sys.exit(f"Invalid or duplicate local port: {key}={port}")
-        used_ports.add(port)
-
+            port = int(env[key])
+            if not 0 < port < 65536 or port in used_ports:
+                sys.exit(f"Invalid or duplicate local port: {key}={port}")
+            used_ports.add(port)
     next_port = 8081
-    for key, _ in module_ports:
+    for key in keys:
         if key not in env:
             while next_port in used_ports:
                 next_port += 1
@@ -69,7 +34,7 @@ def main():
             env[key] = str(next_port)
             used_ports.add(next_port)
             next_port += 1
-    command = ["docker", "compose", "--project-name", env.get("LOCAL_ENV_PROJECT", "distributed-programming-local"), "--project-directory", str(root), "-f", str(root_compose)]
+    command = ["docker", "compose", "--project-name", env.get("LOCAL_ENV_PROJECT", "distributed-programming-local"), "--project-directory", str(root), "-f", str(root / "compose.yaml")]
     for path in modules:
         command.extend(["-f", str(path)])
 
@@ -80,8 +45,8 @@ def main():
         if not args.infra_only:
             architecture = subprocess.check_output(["docker", "info", "--format", "{{.Architecture}}"], env=env, text=True).strip()
             env["GOARCH"] = {"aarch64": "arm64", "x86_64": "amd64"}.get(architecture, architecture)
-            for path in build_modules:
-                subprocess.run(["mise", "run", f"//modules/{path.name}:build"], cwd=root, env=env, check=True)
+            for path in modules:
+                subprocess.run(["mise", "run", f"//modules/{path.parent.name}:build"], cwd=root, env=env, check=True)
         compose("up", "-d", "--wait", "mysql", "rabbitmq")
         # Provision every module on each up, including modules added after
         # the infrastructure volumes were created.
@@ -91,7 +56,9 @@ def main():
                 compose("exec", "-T", "mysql", "sh", "-c", 'MYSQL_PWD="$MYSQL_ROOT_PASSWORD" exec mysql --user=root', input=init_sql.read_text(), text=True)
         if not args.infra_only:
             compose("up", "-d", "--build", "--wait")
-            compose("ps")
+            for path in modules:
+                prefix = path.parent.name.upper()
+                print(f"{path.parent.name}: gRPC={env[prefix + '_GRPC_PORT']}, HTTP={env[prefix + '_HTTP_PORT']}, consumer health={env[prefix + '_MESSAGE_HANDLER_PORT']}")
     elif args.action == "down":
         compose("down", "--remove-orphans")
     elif args.action == "logs":

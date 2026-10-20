@@ -1,4 +1,8 @@
 services:
+  gateway:
+    volumes:
+      - ./modules/auth/routes.yaml:/config/auth-routes.yaml:ro
+
   auth-service:
     image: distributed-programming-auth:local
     build:

@@ -2,11 +2,11 @@ services:
   gateway:
     image: distributed-programming-gateway:local
     build:
-      context: ./modules/gateway
+      context: ../gateway
       dockerfile: Dockerfile
     command: ["--config", "/config"]
     volumes:
-      - ./config/gateway:/config:ro
+      - ../gateway/config:/config:ro
     ports:
       - "${GATEWAY_HTTP_PORT:-8080}:8000"
       - "${GATEWAY_HEALTH_PORT:-15000}:15000"
