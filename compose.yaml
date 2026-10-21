@@ -6,7 +6,7 @@ services:
       dockerfile: Dockerfile
     command: ["--config", "/config"]
     volumes:
-      - ../gateway/config:/config:ro
+      - ../gateway/config/gateway.yaml:/config/gateway.yaml:ro
     ports:
       - "${GATEWAY_HTTP_PORT:-8080}:8000"
       - "${GATEWAY_HEALTH_PORT:-15000}:15000"
