@@ -2,7 +2,6 @@ package public
 
 import (
 	"context"
-	"errors"
 	"log/slog"
 	"net/http"
 
@@ -29,32 +28,13 @@ func Register(svc *app.Service, logger *slog.Logger) (runtimehttp.RegisterFunc, 
 	}
 
 	validationOptions := &openapi3filter.Options{
-		AuthenticationFunc: func(_ context.Context, input *openapi3filter.AuthenticationInput) error {
-			if input.SecuritySchemeName != "sessionAuth" {
-				return errors.New("unsupported authentication scheme")
-			}
-
-			cookie, err := input.RequestValidationInput.Request.Cookie(sessionCookieName)
-			if err != nil || cookie.Value == "" {
-				return errors.New("missing session cookie")
-			}
-
-			return nil
-		},
+		AuthenticationFunc: openapi3filter.NoopAuthenticationFunc,
 	}
 
 	return func(router chi.Router) error {
 		router.Group(func(router chi.Router) {
 			router.Use(func(next http.Handler) http.Handler {
 				return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-					if r.URL.Path == "/api/public/v1/auth/change-password" {
-						cookie, err := r.Cookie(sessionCookieName)
-						if err != nil || cookie.Value == "" {
-							http.Error(w, "unauthorized", http.StatusUnauthorized)
-							return
-						}
-					}
-
 					route, params, err := validatorRouter.FindRoute(r)
 					if err == nil {
 						err = openapi3filter.ValidateRequest(r.Context(), &openapi3filter.RequestValidationInput{
