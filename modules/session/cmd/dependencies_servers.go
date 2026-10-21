@@ -9,9 +9,11 @@ import (
 	"github.com/distributed-programming-2026/lib/runtime/grpc"
 	"github.com/distributed-programming-2026/lib/runtime/http"
 
+	interceptorgrpc "github.com/distributed-programming-2026/gateway/api/client/interceptorgrpc"
 	internalapi "session/api/server/internalapi"
 	"session/internal/session/app"
 	"session/internal/session/config"
+	interceptorhandler "session/internal/session/infra/handlers/interceptor"
 	internalhandler "session/internal/session/infra/handlers/internalapi"
 )
 
@@ -28,6 +30,7 @@ func newGRPCServer(logger *slog.Logger, conf config.Env, svc *app.Service) (*grp
 		GraceTimeout: conf.App.GraceTimeout,
 	}, func(server *grpcserver.Server) error {
 		internalapi.RegisterSessionServiceServer(server, internalhandler.NewHandler(svc, logger))
+		interceptorgrpc.RegisterInterceptorServer(server, interceptorhandler.NewHandler(svc, logger))
 		reflection.Register(server)
 		return nil
 	})

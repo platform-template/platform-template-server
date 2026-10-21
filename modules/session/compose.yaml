@@ -1,4 +1,8 @@
 services:
+  gateway:
+    volumes:
+      - ./modules/session/routes.yaml:/config/session-routes.yaml:ro
+
   session-service:
     image: distributed-programming-session:local
     build:
