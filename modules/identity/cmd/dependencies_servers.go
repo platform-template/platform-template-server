@@ -12,14 +12,20 @@ import (
 	internalapi "identity/api/server/internalapi"
 	"identity/internal/identity/app"
 	"identity/internal/identity/config"
+	httphandler "identity/internal/identity/infra/handlers/httpapi"
 	internalhandler "identity/internal/identity/infra/handlers/internalapi"
 )
 
-func newHTTPServer(_ *slog.Logger, conf config.Env, _ *app.Service) (*http.Server, error) {
+func newHTTPServer(logger *slog.Logger, conf config.Env, svc *app.Service) (*http.Server, error) {
+	register, err := httphandler.Register(svc, logger)
+	if err != nil {
+		return nil, err
+	}
+
 	return http.NewServer(http.Config{
 		Address:      conf.HTTP.Address,
 		GraceTimeout: conf.App.GraceTimeout,
-	})
+	}, register)
 }
 
 func newGRPCServer(logger *slog.Logger, conf config.Env, svc *app.Service) (*grpc.Server, error) {

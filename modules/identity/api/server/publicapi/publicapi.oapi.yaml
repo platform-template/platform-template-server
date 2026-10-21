@@ -1,38 +1,58 @@
 openapi: 3.0.0
 info:
   version: 1.0.0
-  title: Identity service public API
+  title: Identity service API
   x-api-identifier: identitypublicapi
 paths:
-  /api/public/v1/echo:
-    post:
-      operationId: echo
+  /api/v1/identity/me:
+    get:
+      operationId: getCurrentIdentity
+      responses:
+        "200":
+          description: Current identity
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/identity"
+        "401": {description: Missing or invalid authenticated user}
+        "404": {description: User not found}
+        "500": {description: Internal server error}
+    patch:
+      operationId: updateCurrentIdentity
       requestBody:
         required: true
         content:
           application/json:
             schema:
-              $ref: "#/components/schemas/echoRequest"
+              $ref: "#/components/schemas/updateCurrentIdentityRequest"
       responses:
         "200":
-          description: OK
+          description: Updated identity
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/echoResponseData"
+                $ref: "#/components/schemas/identity"
+        "400": {description: Invalid profile data}
+        "401": {description: Missing or invalid authenticated user}
+        "404": {description: User not found}
+        "500": {description: Internal server error}
 components:
   schemas:
-    echoRequest:
+    identity:
       type: object
+      required: [userId, login, firstName, lastName, middleName, email]
       properties:
-        body:
-          type: string
-      required:
-        - body
-    echoResponseData:
+        userId: {type: string, format: uuid}
+        login: {type: string}
+        firstName: {type: string}
+        lastName: {type: string}
+        middleName: {type: string}
+        email: {type: string, format: email}
+    updateCurrentIdentityRequest:
       type: object
+      required: [firstName, lastName, middleName, email]
       properties:
-        operationID:
-          type: string
-      required:
-        - operationID
+        firstName: {type: string, minLength: 1}
+        lastName: {type: string, minLength: 1}
+        middleName: {type: string}
+        email: {type: string, format: email}

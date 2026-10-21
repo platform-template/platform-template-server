@@ -1,4 +1,8 @@
 services:
+  gateway:
+    volumes:
+      - ./modules/identity/routes.yaml:/config/identity-routes.yaml:ro
+
   identity-service:
     image: distributed-programming-identity:local
     build:

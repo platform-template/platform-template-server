@@ -11,14 +11,20 @@ type fakeIdentityRepository struct {
 	nextIDErr    error
 	existingUser *User
 	findErr      error
+	findByIDErr  error
 	storeErr     error
+	updateErr    error
 
-	storedUser *User
-	foundLogin string
+	storedUser  *User
+	updatedUser *User
+	foundLogin  string
+	foundID     uuid.UUID
 
-	nextIDCalls int
-	findCalls   int
-	storeCalls  int
+	nextIDCalls   int
+	findCalls     int
+	storeCalls    int
+	findByIDCalls int
+	updateCalls   int
 }
 
 func (f *fakeIdentityRepository) NextID() (uuid.UUID, error) {
@@ -36,6 +42,18 @@ func (f *fakeIdentityRepository) FindByLogin(login string) (*User, error) {
 	f.findCalls++
 	f.foundLogin = login
 	return f.existingUser, f.findErr
+}
+
+func (f *fakeIdentityRepository) FindByID(userID uuid.UUID) (*User, error) {
+	f.findByIDCalls++
+	f.foundID = userID
+	return f.existingUser, f.findByIDErr
+}
+
+func (f *fakeIdentityRepository) Update(user *User) error {
+	f.updateCalls++
+	f.updatedUser = user
+	return f.updateErr
 }
 
 var _ IdentityRepository = (*fakeIdentityRepository)(nil)
@@ -330,6 +348,44 @@ func TestIdentityService_FindByLogin(t *testing.T) {
 
 			if repo.foundLogin != tt.wantLogin {
 				t.Errorf("expected lookup login %q, got %q", tt.wantLogin, repo.foundLogin)
+			}
+		})
+	}
+}
+
+func TestIdentityService_Update(t *testing.T) {
+	userID := uuid.New()
+	current, err := NewUser(userID, "Alex", "Smith", "", testAlexLogin, Email("alex@example.com"))
+	if err != nil {
+		t.Fatalf("create user: %v", err)
+	}
+
+	tests := []struct {
+		name    string
+		first   string
+		last    string
+		middle  string
+		email   string
+		found   *User
+		wantErr error
+	}{
+		{name: "updates profile", first: "Ann", last: "Jones", middle: "Lee", email: "ann@example.com", found: current},
+		{name: "missing user", first: "Ann", last: "Jones", email: "ann@example.com", wantErr: ErrUserNotFound},
+		{name: "empty first name", first: "", last: "Jones", email: "ann@example.com", found: current, wantErr: ErrInvalidFirstName},
+		{name: "invalid email", first: "Ann", last: "Jones", email: "invalid", found: current, wantErr: ErrInvalidEmail},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			repo := &fakeIdentityRepository{existingUser: tt.found}
+			_, err := NewIdentityService(repo).Update(userID, tt.first, tt.last, tt.middle, tt.email)
+			if !errors.Is(err, tt.wantErr) {
+				t.Fatalf("expected error %v, got %v", tt.wantErr, err)
+			}
+			if tt.wantErr == nil {
+				if repo.updatedUser == nil || repo.updatedUser.login != testAlexLogin || repo.updatedUser.middleName != tt.middle {
+					t.Fatalf("unexpected updated user: %#v", repo.updatedUser)
+				}
 			}
 		})
 	}

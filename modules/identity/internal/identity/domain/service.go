@@ -86,3 +86,49 @@ func (s *IdentityService) FindByLogin(login string) (*User, error) {
 
 	return user, nil
 }
+
+func (s *IdentityService) FindByID(userID uuid.UUID) (*User, error) {
+	if userID == uuid.Nil() {
+		return nil, ErrInvalidUserID
+	}
+
+	user, err := s.repo.FindByID(userID)
+	if err != nil {
+		return nil, fmt.Errorf("find user by ID: %w", err)
+	}
+	if user == nil {
+		return nil, fmt.Errorf("find user by ID: %w", ErrUserNotFound)
+	}
+
+	return user, nil
+}
+
+func (s *IdentityService) Update(
+	userID uuid.UUID,
+	firstName,
+	lastName,
+	middleName,
+	email string,
+) (*User, error) {
+	current, err := s.FindByID(userID)
+	if err != nil {
+		return nil, fmt.Errorf("update user: %w", err)
+	}
+
+	updated, err := NewUser(
+		userID,
+		firstName,
+		lastName,
+		middleName,
+		current.Data().Login,
+		Email(email),
+	)
+	if err != nil {
+		return nil, fmt.Errorf("update user: %w", err)
+	}
+	if err := s.repo.Update(updated); err != nil {
+		return nil, fmt.Errorf("update user: %w", err)
+	}
+
+	return updated, nil
+}

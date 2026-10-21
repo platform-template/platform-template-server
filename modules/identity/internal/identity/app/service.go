@@ -63,3 +63,43 @@ func (s *Service) FindByLogin(ctx context.Context, login string) (uuid.UUID, err
 
 	return userID, nil
 }
+
+func (s *Service) FindByID(ctx context.Context, userID uuid.UUID) (*domain.User, error) {
+	var user *domain.User
+
+	err := s.unit.ExecuteWithRepositoryProvider(ctx, func(provider *mysql.RepositoryProvider) error {
+		var err error
+		user, err = domain.NewIdentityService(provider.Identity(ctx)).FindByID(userID)
+		return err
+	})
+	if err != nil {
+		return nil, fmt.Errorf("identity: find user by ID: %w", err)
+	}
+
+	return user, nil
+}
+
+func (s *Service) Update(
+	ctx context.Context,
+	userID uuid.UUID,
+	firstName, lastName, middleName, email string,
+) (*domain.User, error) {
+	var user *domain.User
+
+	err := s.unit.ExecuteWithRepositoryProvider(ctx, func(provider *mysql.RepositoryProvider) error {
+		var err error
+		user, err = domain.NewIdentityService(provider.Identity(ctx)).Update(
+			userID,
+			firstName,
+			lastName,
+			middleName,
+			email,
+		)
+		return err
+	})
+	if err != nil {
+		return nil, fmt.Errorf("identity: update user: %w", err)
+	}
+
+	return user, nil
+}

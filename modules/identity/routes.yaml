@@ -1,0 +1,9 @@
+kind: gateway/service/v1
+name: identity
+weight: 100
+routes:
+  - pattern: '^/api/v1/identity/me$'
+    allowedMethods: [GET, PATCH]
+    target: identity-service:8082
+    interceptors:
+      - id: session

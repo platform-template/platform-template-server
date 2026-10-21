@@ -105,4 +105,6 @@ type IdentityRepository interface {
 	NextID() (uuid.UUID, error)
 	Store(*User) error
 	FindByLogin(string) (*User, error)
+	FindByID(uuid.UUID) (*User, error)
+	Update(*User) error
 }

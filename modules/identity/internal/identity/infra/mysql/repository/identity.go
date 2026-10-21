@@ -76,3 +76,67 @@ WHERE login = ?
 
 	return user, nil
 }
+
+func (r *identityRepository) FindByID(userID uuid.UUID) (*domain.User, error) {
+	return r.findOne("identity.find_by_id", `
+SELECT id, first_name, last_name, middle_name, login, email
+FROM users
+WHERE id = ?
+`, userID.String())
+}
+
+func (r *identityRepository) Update(user *domain.User) error {
+	data := user.Data()
+	_, err := r.client.ExecContext(r.ctx, "identity.update", `
+UPDATE users
+SET first_name = ?, last_name = ?, middle_name = ?, email = ?
+WHERE id = ?
+`, data.FirstName, data.LastName, data.MiddleName, data.Email.String(), data.ID.String())
+	if err != nil {
+		return fmt.Errorf("update user: %w", err)
+	}
+
+	return nil
+}
+
+func (r *identityRepository) findOne(queryName, query, argument string) (*domain.User, error) {
+	var id, firstName, lastName, middleName, storedLogin, email string
+
+	err := r.client.QueryRowContext(
+		r.ctx,
+		queryName,
+		query,
+		argument,
+	).Scan(
+		&id,
+		&firstName,
+		&lastName,
+		&middleName,
+		&storedLogin,
+		&email,
+	)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("find user: %w", err)
+	}
+
+	parsedID, err := uuid.Parse(id)
+	if err != nil {
+		return nil, fmt.Errorf("parse user ID: %w", err)
+	}
+	user, err := domain.NewUser(
+		parsedID,
+		firstName,
+		lastName,
+		middleName,
+		storedLogin,
+		domain.Email(email),
+	)
+	if err != nil {
+		return nil, fmt.Errorf("restore user: %w", err)
+	}
+
+	return user, nil
+}
