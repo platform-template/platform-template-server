@@ -1,11 +1,12 @@
 package domain
 
 import (
-	"errors"
 	"testing"
 	"time"
 
 	"uuid"
+
+	"github.com/stretchr/testify/require"
 )
 
 const testToken = SessionToken("token")
@@ -45,18 +46,12 @@ func TestSessionServiceCreateStoresOnlyTokenHash(t *testing.T) {
 	userID := uuid.New()
 	repo := &fakeSessionRepository{nextID: uuid.New()}
 	token, err := NewSessionService(repo).Create(userID)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if token == "" || repo.stored == nil || repo.stored.Data().UserID != userID {
-		t.Fatal("session was not stored")
-	}
-	if repo.stored.Data().TokenHash != HashSessionToken(token) {
-		t.Fatal("stored hash does not match returned token")
-	}
-	if string(repo.stored.Data().TokenHash) == string(token) {
-		t.Fatal("plain token must not be persisted")
-	}
+	require.NoError(t, err)
+	require.NotEmpty(t, token)
+	require.NotNil(t, repo.stored)
+	require.Equal(t, userID, repo.stored.Data().UserID)
+	require.Equal(t, HashSessionToken(token), repo.stored.Data().TokenHash)
+	require.NotEqual(t, string(token), string(repo.stored.Data().TokenHash))
 }
 
 func TestSessionServiceResolve(t *testing.T) {
@@ -99,14 +94,10 @@ func TestSessionServiceResolve(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			repo := &fakeSessionRepository{session: tt.session}
 			got, err := NewSessionService(repo).Resolve(tt.token)
-			if !errors.Is(err, tt.wantErr) {
-				t.Fatalf("expected %v, got %v", tt.wantErr, err)
-			}
-			if got != tt.wantID {
-				t.Fatalf("expected user %v, got %v", tt.wantID, got)
-			}
-			if tt.token != "" && repo.findHash != HashSessionToken(tt.token) {
-				t.Fatal("lookup must use token hash")
+			require.ErrorIs(t, err, tt.wantErr)
+			require.Equal(t, tt.wantID, got)
+			if tt.token != "" {
+				require.Equal(t, HashSessionToken(tt.token), repo.findHash)
 			}
 		})
 	}
@@ -114,15 +105,11 @@ func TestSessionServiceResolve(t *testing.T) {
 
 func TestSessionServiceRevokeByToken(t *testing.T) {
 	repo := &fakeSessionRepository{}
-	if err := NewSessionService(repo).RevokeByToken("token"); err != nil {
-		t.Fatal(err)
-	}
-	if repo.revokedHash != HashSessionToken("token") {
-		t.Fatal("revocation must use token hash")
-	}
-	if err := NewSessionService(repo).RevokeByToken(""); !errors.Is(err, ErrInvalidToken) {
-		t.Fatalf("expected invalid token, got %v", err)
-	}
+	err := NewSessionService(repo).RevokeByToken("token")
+	require.NoError(t, err)
+	require.Equal(t, HashSessionToken("token"), repo.revokedHash)
+	err = NewSessionService(repo).RevokeByToken("")
+	require.ErrorIs(t, err, ErrInvalidToken)
 }
 
 func TestSessionServiceRevokeOthersKeepsCurrentValidSession(t *testing.T) {
@@ -134,14 +121,11 @@ func TestSessionServiceRevokeOthersKeepsCurrentValidSession(t *testing.T) {
 			expiresAt: time.Now().Add(time.Hour),
 		},
 	}
-	if err := NewSessionService(repo).RevokeOthersByUserID(userID, token); err != nil {
-		t.Fatal(err)
-	}
-	if repo.revokeOthersCalls != 1 ||
-		repo.revokedUserID != userID ||
-		repo.excludedHash != HashSessionToken(token) {
-		t.Fatal("current token was not excluded from revocation")
-	}
+	err := NewSessionService(repo).RevokeOthersByUserID(userID, token)
+	require.NoError(t, err)
+	require.Equal(t, 1, repo.revokeOthersCalls)
+	require.Equal(t, userID, repo.revokedUserID)
+	require.Equal(t, HashSessionToken(token), repo.excludedHash)
 }
 
 func TestSessionServiceRevokeOthersRejectsForeignToken(t *testing.T) {
@@ -153,10 +137,6 @@ func TestSessionServiceRevokeOthersRejectsForeignToken(t *testing.T) {
 		},
 	}
 	err := NewSessionService(repo).RevokeOthersByUserID(userID, "foreign-token")
-	if !errors.Is(err, ErrInvalidToken) {
-		t.Fatalf("expected invalid token, got %v", err)
-	}
-	if repo.revokeOthersCalls != 0 {
-		t.Fatal("must not revoke sessions for a foreign token")
-	}
+	require.ErrorIs(t, err, ErrInvalidToken)
+	require.Equal(t, 0, repo.revokeOthersCalls)
 }

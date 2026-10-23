@@ -9,6 +9,7 @@ import (
 	"uuid"
 
 	interceptorgrpc "github.com/distributed-programming-2026/gateway/api/client/interceptorgrpc"
+	"github.com/stretchr/testify/require"
 
 	"session/internal/session/domain"
 )
@@ -44,24 +45,19 @@ func TestHandlerIntercept(t *testing.T) {
 			resolver := tt.resolver
 			h := NewHandler(&resolver, slog.New(slog.NewTextHandler(io.Discard, nil)))
 			response, err := h.Intercept(context.Background(), requestWithCookie(tt.cookie))
-			if err != nil {
-				t.Fatalf("unexpected error: %v", err)
-			}
+			require.NoError(t, err)
 
 			if tt.statusCode != 0 {
-				if response.GetImmediateResponse().GetStatusCode() != tt.statusCode {
-					t.Fatalf("expected status %d, got %d", tt.statusCode, response.GetImmediateResponse().GetStatusCode())
-				}
+				require.Equal(t, tt.statusCode, response.GetImmediateResponse().GetStatusCode())
 				return
 			}
 
 			mutation := response.GetContinueResponse().GetHeaderMutation()
-			if resolver.token != "token" {
-				t.Fatalf("expected token to be resolved, got %q", resolver.token)
-			}
-			if len(mutation.GetSet()) != 1 || mutation.GetSet()[0].GetKey() != authUserHeader || mutation.GetSet()[0].GetValues()[0] != tt.wantUserID {
-				t.Fatalf("unexpected header mutation: %#v", mutation)
-			}
+			require.Equal(t, "token", resolver.token)
+			require.Len(t, mutation.GetSet(), 1)
+			require.Equal(t, authUserHeader, mutation.GetSet()[0].GetKey())
+			require.NotEmpty(t, mutation.GetSet()[0].GetValues())
+			require.Equal(t, tt.wantUserID, mutation.GetSet()[0].GetValues()[0])
 		})
 	}
 }

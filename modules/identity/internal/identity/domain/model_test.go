@@ -1,9 +1,11 @@
 package domain
 
 import (
-	"errors"
 	"testing"
 	"uuid"
+
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func TestNewEmail(t *testing.T) {
@@ -49,24 +51,16 @@ func TestNewEmail(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			got, err := NewEmail(tt.input)
 
-			if !errors.Is(err, tt.wantErr) {
-				t.Fatalf("expected error %v, got %v", tt.wantErr, err)
-			}
+			require.ErrorIs(t, err, tt.wantErr)
 
 			if err != nil {
-				if got != "" {
-					t.Errorf("expected empty email on error, got %q", got)
-				}
+				assert.Empty(t, got)
 				return
 			}
 
-			if got != tt.want {
-				t.Errorf("expected %q, got %q", tt.want, got)
-			}
+			assert.Equal(t, tt.want, got)
 
-			if got.String() != string(tt.want) {
-				t.Errorf("unexpected String() result: %q", got.String())
-			}
+			assert.Equal(t, string(tt.want), got.String())
 		})
 	}
 }
@@ -132,11 +126,11 @@ func TestNewUserValidatesRequiredFields(t *testing.T) {
 				tt.login,
 				Email(tt.email),
 			)
-			if !errors.Is(err, tt.wantErr) {
-				t.Fatalf("expected %v, got %v", tt.wantErr, err)
-			}
-			if tt.wantErr == nil && (user.Data().FirstName != testFirstName || user.Data().Login != testLogin) {
-				t.Fatal("user fields were not normalized")
+			require.ErrorIs(t, err, tt.wantErr)
+			if tt.wantErr == nil {
+				require.NotNil(t, user)
+				require.Equal(t, testFirstName, user.Data().FirstName)
+				require.Equal(t, testLogin, user.Data().Login)
 			}
 		})
 	}

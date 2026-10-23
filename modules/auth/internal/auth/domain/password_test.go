@@ -1,8 +1,9 @@
 package domain
 
 import (
-	"errors"
 	"testing"
+
+	"github.com/stretchr/testify/assert"
 )
 
 const (
@@ -49,9 +50,7 @@ func TestValidatePassword(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			err := ValidatePassword(tt.password)
 
-			if !errors.Is(err, tt.wantErr) {
-				t.Errorf("expected error %v, got %v", tt.wantErr, err)
-			}
+			assert.ErrorIs(t, err, tt.wantErr)
 		})
 	}
 }

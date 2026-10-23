@@ -4,6 +4,9 @@ import (
 	"errors"
 	"testing"
 	"uuid"
+
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 type fakeIdentityRepository struct {
@@ -58,7 +61,7 @@ func (f *fakeIdentityRepository) Update(user *User) error {
 
 var _ IdentityRepository = (*fakeIdentityRepository)(nil)
 
-func TestIdentityService_Create(t *testing.T) { // TODO: testify
+func TestIdentityService_Create(t *testing.T) {
 	expectedID := uuid.New()
 
 	repo := &fakeIdentityRepository{
@@ -74,44 +77,21 @@ func TestIdentityService_Create(t *testing.T) { // TODO: testify
 		"  alex@example.com  ",
 	)
 
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-
-	if id != expectedID {
-		t.Errorf("expected ID %v, got %v", expectedID, id)
-	}
-
-	if repo.findCalls != 1 || repo.nextIDCalls != 1 || repo.storeCalls != 1 {
-		t.Errorf("unexpected repository calls: find=%d, nextID=%d, store=%d",
-			repo.findCalls, repo.nextIDCalls, repo.storeCalls)
-	}
-
-	if repo.foundLogin != testAlexLogin {
-		t.Errorf("expected lookup login %q, got %q", testAlexLogin, repo.foundLogin)
-	}
-
-	if repo.storedUser == nil {
-		t.Fatal("expected user to be stored")
-	}
+	require.NoError(t, err)
+	assert.Equal(t, expectedID, id)
+	assert.Equal(t, 1, repo.findCalls, "FindByLogin calls")
+	assert.Equal(t, 1, repo.nextIDCalls, "NextID calls")
+	assert.Equal(t, 1, repo.storeCalls, "Store calls")
+	assert.Equal(t, testAlexLogin, repo.foundLogin)
+	require.NotNil(t, repo.storedUser)
 
 	user := repo.storedUser
-
-	if user.id != expectedID {
-		t.Errorf("expected stored ID %v, got %v", expectedID, user.id)
-	}
-
-	if user.firstName != "Alex" || user.lastName != "Smith" || user.middleName != "James" {
-		t.Errorf("unexpected stored name: %q %q %q", user.firstName, user.lastName, user.middleName)
-	}
-
-	if user.login != testAlexLogin {
-		t.Errorf("expected stored login %q, got %q", testAlexLogin, user.login)
-	}
-
-	if user.email != Email("alex@example.com") {
-		t.Errorf("expected stored email %q, got %q", "alex@example.com", user.email)
-	}
+	assert.Equal(t, expectedID, user.id)
+	assert.Equal(t, "Alex", user.firstName)
+	assert.Equal(t, "Smith", user.lastName)
+	assert.Equal(t, "James", user.middleName)
+	assert.Equal(t, testAlexLogin, user.login)
+	assert.Equal(t, Email("alex@example.com"), user.email)
 }
 
 type createInput struct {
@@ -250,25 +230,15 @@ func TestIdentityService_Create_Errors(t *testing.T) {
 				input.email,
 			)
 
-			if !errors.Is(err, tt.wantErr) {
-				t.Fatalf("expected error %v, got %v", tt.wantErr, err)
-			}
+			require.ErrorIs(t, err, tt.wantErr)
 
-			if id != uuid.Nil() {
-				t.Errorf("expected nil UUID on error, got %v", id)
-			}
+			assert.Equal(t, uuid.Nil(), id)
 
-			if repo.findCalls != tt.wantFind {
-				t.Errorf("expected %d Find calls, got %d", tt.wantFind, repo.findCalls)
-			}
+			assert.Equal(t, tt.wantFind, repo.findCalls)
 
-			if repo.nextIDCalls != tt.wantNextID {
-				t.Errorf("expected %d NextID calls, got %d", tt.wantNextID, repo.nextIDCalls)
-			}
+			assert.Equal(t, tt.wantNextID, repo.nextIDCalls)
 
-			if repo.storeCalls != tt.wantStore {
-				t.Errorf("expected %d Store calls, got %d", tt.wantStore, repo.storeCalls)
-			}
+			assert.Equal(t, tt.wantStore, repo.storeCalls)
 		})
 	}
 }
@@ -330,35 +300,31 @@ func TestIdentityService_FindByLogin(t *testing.T) {
 
 			user, err := service.FindByLogin(tt.login)
 
-			if !errors.Is(err, tt.wantErr) {
-				t.Fatalf("expected error %v, got %v", tt.wantErr, err)
-			}
+			require.ErrorIs(t, err, tt.wantErr)
 
 			if tt.wantErr != nil {
-				if user != nil {
-					t.Error("expected nil user on error")
-				}
-			} else if user != tt.foundUser {
-				t.Errorf("expected user %p, got %p", tt.foundUser, user)
+				assert.Nil(t, user)
+			} else {
+				assert.Same(t, tt.foundUser, user)
 			}
 
-			if repo.findCalls != tt.wantCalls {
-				t.Errorf("expected %d Find calls, got %d", tt.wantCalls, repo.findCalls)
-			}
+			assert.Equal(t, tt.wantCalls, repo.findCalls)
 
-			if repo.foundLogin != tt.wantLogin {
-				t.Errorf("expected lookup login %q, got %q", tt.wantLogin, repo.foundLogin)
-			}
+			assert.Equal(t, tt.wantLogin, repo.foundLogin)
 		})
 	}
 }
 
 func TestIdentityService_Update(t *testing.T) {
+	const (
+		updatedFirstName = "Ann"
+		updatedLastName  = "Jones"
+		updatedEmail     = "ann@example.com"
+	)
+
 	userID := uuid.New()
 	current, err := NewUser(userID, "Alex", "Smith", "", testAlexLogin, Email("alex@example.com"))
-	if err != nil {
-		t.Fatalf("create user: %v", err)
-	}
+	require.NoError(t, err)
 
 	tests := []struct {
 		name    string
@@ -369,23 +335,21 @@ func TestIdentityService_Update(t *testing.T) {
 		found   *User
 		wantErr error
 	}{
-		{name: "updates profile", first: "Ann", last: "Jones", middle: "Lee", email: "ann@example.com", found: current},
-		{name: "missing user", first: "Ann", last: "Jones", email: "ann@example.com", wantErr: ErrUserNotFound},
-		{name: "empty first name", first: "", last: "Jones", email: "ann@example.com", found: current, wantErr: ErrInvalidFirstName},
-		{name: "invalid email", first: "Ann", last: "Jones", email: "invalid", found: current, wantErr: ErrInvalidEmail},
+		{name: "updates profile", first: updatedFirstName, last: updatedLastName, middle: "Lee", email: updatedEmail, found: current},
+		{name: "missing user", first: updatedFirstName, last: updatedLastName, email: updatedEmail, wantErr: ErrUserNotFound},
+		{name: "empty first name", first: "", last: updatedLastName, email: updatedEmail, found: current, wantErr: ErrInvalidFirstName},
+		{name: "invalid email", first: updatedFirstName, last: updatedLastName, email: "invalid", found: current, wantErr: ErrInvalidEmail},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			repo := &fakeIdentityRepository{existingUser: tt.found}
 			_, err := NewIdentityService(repo).Update(userID, tt.first, tt.last, tt.middle, tt.email)
-			if !errors.Is(err, tt.wantErr) {
-				t.Fatalf("expected error %v, got %v", tt.wantErr, err)
-			}
+			require.ErrorIs(t, err, tt.wantErr)
 			if tt.wantErr == nil {
-				if repo.updatedUser == nil || repo.updatedUser.login != testAlexLogin || repo.updatedUser.middleName != tt.middle {
-					t.Fatalf("unexpected updated user: %#v", repo.updatedUser)
-				}
+				require.NotNil(t, repo.updatedUser)
+				require.Equal(t, testAlexLogin, repo.updatedUser.login)
+				require.Equal(t, tt.middle, repo.updatedUser.middleName)
 			}
 		})
 	}

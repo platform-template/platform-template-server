@@ -1,10 +1,12 @@
 package domain
 
 import (
-	"errors"
 	"testing"
 
 	"uuid"
+
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func TestNewPasswordCredential(t *testing.T) {
@@ -39,28 +41,18 @@ func TestNewPasswordCredential(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			credential, err := NewPasswordCredential(tt.userID, tt.hash)
 
-			if !errors.Is(err, tt.wantErr) {
-				t.Fatalf("expected error %v, got %v", tt.wantErr, err)
-			}
+			require.ErrorIs(t, err, tt.wantErr)
 
 			if tt.wantErr != nil {
-				if credential != nil {
-					t.Error("expected nil credential on error")
-				}
+				assert.Nil(t, credential)
 				return
 			}
 
-			if credential == nil {
-				t.Fatal("expected non-nil credential")
-			}
+			require.NotNil(t, credential)
 
-			if credential.userID != tt.userID {
-				t.Errorf("expected user ID %v, got %v", tt.userID, credential.userID)
-			}
+			assert.Equal(t, tt.userID, credential.userID)
 
-			if credential.passwordHash != tt.hash {
-				t.Error("credential contains incorrect password hash")
-			}
+			assert.Equal(t, tt.hash, credential.passwordHash)
 		})
 	}
 }
@@ -94,13 +86,9 @@ func TestPasswordCredential_ChangePasswordHash(t *testing.T) {
 
 			err := credential.changePasswordHash(tt.newHash)
 
-			if !errors.Is(err, tt.wantErr) {
-				t.Fatalf("expected error %v, got %v", tt.wantErr, err)
-			}
+			require.ErrorIs(t, err, tt.wantErr)
 
-			if credential.passwordHash != tt.wantHash {
-				t.Errorf("expected hash %q, got %q", tt.wantHash, credential.passwordHash)
-			}
+			assert.Equal(t, tt.wantHash, credential.passwordHash)
 		})
 	}
 }

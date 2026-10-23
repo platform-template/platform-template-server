@@ -5,6 +5,9 @@ import (
 	"testing"
 
 	"uuid"
+
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 type fakeAuthRepository struct {
@@ -106,26 +109,19 @@ func TestAuthService_Create(t *testing.T) {
 			service := NewAuthService(repo, hasher)
 
 			err := service.Create(userID, tt.password)
-			if !errors.Is(err, tt.wantErr) {
-				t.Fatalf("want error %v, got %v", tt.wantErr, err)
-			}
+			require.ErrorIs(t, err, tt.wantErr)
 
 			if tt.wantErr != nil {
-				if tt.storeErr == nil && repo.storeCalls != 0 {
-					t.Error("invalid or duplicate credentials must not be stored")
+				if tt.storeErr == nil {
+					assert.Zero(t, repo.storeCalls, "invalid or duplicate credentials must not be stored")
 				}
 				return
 			}
 
-			if repo.stored == nil {
-				t.Fatal("credential was not stored")
-			}
-			if repo.stored.userID != userID || repo.stored.passwordHash != "created-hash" {
-				t.Error("stored credential has incorrect data")
-			}
-			if hasher.hashedPassword != tt.password {
-				t.Error("hasher received an unexpected password")
-			}
+			require.NotNil(t, repo.stored)
+			assert.Equal(t, userID, repo.stored.userID)
+			assert.Equal(t, "created-hash", repo.stored.passwordHash)
+			assert.Equal(t, tt.password, hasher.hashedPassword)
 		})
 	}
 }
@@ -167,14 +163,11 @@ func TestAuthService_Check(t *testing.T) {
 			service := NewAuthService(repo, hasher)
 
 			match, err := service.Check(userID, "entered-password")
-			if !errors.Is(err, tt.wantErr) {
-				t.Fatalf("want error %v, got %v", tt.wantErr, err)
-			}
-			if match != tt.wantMatch {
-				t.Errorf("want match=%t, got %t", tt.wantMatch, match)
-			}
-			if !tt.missing && (hasher.verifiedPassword != "entered-password" || hasher.verifiedHash != "stored-hash") {
-				t.Error("Verify must receive the entered password and stored hash")
+			require.ErrorIs(t, err, tt.wantErr)
+			assert.Equal(t, tt.wantMatch, match)
+			if !tt.missing {
+				assert.Equal(t, "entered-password", hasher.verifiedPassword)
+				assert.Equal(t, "stored-hash", hasher.verifiedHash)
 			}
 		})
 	}
@@ -226,28 +219,21 @@ func TestAuthService_ChangePassword(t *testing.T) {
 			service := NewAuthService(repo, hasher)
 
 			err := service.ChangePassword(userID, "new-password-123")
-			if !errors.Is(err, tt.wantErr) {
-				t.Fatalf("want error %v, got %v", tt.wantErr, err)
-			}
+			require.ErrorIs(t, err, tt.wantErr)
 
 			if tt.verifyMatch {
-				if repo.changeCalls != 0 || hasher.hashCalls != 0 {
-					t.Error("unchanged password must not be rehashed or saved")
-				}
-				if repo.credential.passwordHash != testOldHash {
-					t.Error("old hash should be preserved")
-				}
+				assert.Zero(t, repo.changeCalls, "unchanged password must not be saved")
+				assert.Zero(t, hasher.hashCalls, "unchanged password must not be rehashed")
+				assert.Equal(t, testOldHash, repo.credential.passwordHash)
 			}
 
 			if tt.wantErr != nil {
 				return
 			}
-			if repo.changed == nil || repo.changed.passwordHash != testNewHash {
-				t.Error("new password hash was not saved")
-			}
-			if hasher.verifiedPassword != "new-password-123" || hasher.verifiedHash != testOldHash {
-				t.Error("Verify must compare new password with old hash")
-			}
+			require.NotNil(t, repo.changed)
+			assert.Equal(t, testNewHash, repo.changed.passwordHash)
+			assert.Equal(t, "new-password-123", hasher.verifiedPassword)
+			assert.Equal(t, testOldHash, hasher.verifiedHash)
 		})
 	}
 }
