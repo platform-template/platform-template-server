@@ -36,10 +36,45 @@ envelope с event ID, producer, type, временем и correlation ID. Общ
 - `internal/template/infra/handlers`: HTTP, gRPC и события.
 - `internal/integration-tests`: инфраструктура, контейнеры и интеграционные проверки.
 - `api`: protobuf/OpenAPI-контракты; generated Go-код исключён из Git.
+- `config/gateway`: маршруты и объявления интерцепторов модуля для общего gateway.
 
 Repository provider хранит транзакционный клиент и выдаёт репозиторий с контекстом
 операции. `app` использует `ExecuteWithRepositoryProvider`; SQL-клиент в него не
 передаётся. Outbox и репозиторий используют один context и один экземпляр UOW.
+
+UUID в таблице `echo` хранится как `BINARY(16)`. В SQL-параметры передаётся
+`uuid.UUID`: MySQL-клиент SDK преобразует его в 16 байт. В HTTP, gRPC и событиях
+ID остаётся строкой.
+
+## Пример интерцептора gateway
+
+`internal/template/infra/handlers/gateway` реализует gRPC API интерцептора через
+`lib/gateway/interceptor` и регистрируется на сервере
+модуля (`8081`) вместе с internal API. `config/gateway/interceptor.yaml` объявляет
+интерцептор, а `routes.yaml` подключает его к маршруту `/template/api/...`.
+`local-up` автоматически собирает оба файла в конфигурацию gateway.
+
+Пример показывает три решения:
+
+- `requestHeaders`: устанавливает `X-Demo-Request-ID` из `context.requestId`, заменяя значение клиента.
+- `responseHeaders`: добавляет `X-Demo-Interceptor: template` в ответ backend.
+- `requestHeaders` с `X-Demo-Deny: true`: возвращает JSON с HTTP `403` через `immediateResponse`; backend и response-фаза не вызываются.
+
+Это демонстрация API. Проверку заголовка `X-Demo-Deny` следует заменить политикой
+приложения, если нужна авторизация или другая бизнес-проверка.
+
+После `mise run local-up`:
+
+```sh
+curl -i -X POST localhost/template/api/public/v1/echo \
+  -H 'Content-Type: application/json' -d '{"body":"through gateway"}'
+curl -i -X POST localhost/template/api/public/v1/echo \
+  -H 'Content-Type: application/json' -H 'X-Demo-Deny: true' -d '{"body":"denied"}'
+```
+
+Первый ответ содержит `X-Demo-Interceptor: template`, второй — `403`.
+Для отключения примера удалите `interceptors` у маршрута. При обращении к HTTP
+порту модуля напрямую интерцептор не вызывается.
 
 ## Запуск
 
@@ -51,6 +86,18 @@ mise run local-up
 
 Корневой mise автоматически подключает модульный `compose.yaml`, собирает бинарник
 и поднимает сервис и consumer в контейнерах.
+
+Конфиги из `config/gateway/` автоматически собираются вместе с конфигами
+остальных модулей при `local-up`. Общие настройки gateway находятся в корневом
+`config/gateway/`. Маршрут `/template/api/...` проксируется на
+`template-service:8082`, удаляя префикс `/template`:
+
+```sh
+curl -X POST localhost/template/api/public/v1/echo \
+  -H 'Content-Type: application/json' -d '{"body":"hello"}'
+```
+
+После изменения конфигов повторите `mise run local-up` для перезапуска gateway.
 
 Бинарник поддерживает `service` (по умолчанию) и `message-handler`.
 `service` запускает HTTP, gRPC и relay. `message-handler` запускает consumer
