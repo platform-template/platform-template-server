@@ -17,13 +17,13 @@ import (
 	sessionapi "session/api/server/internalapi"
 )
 
-type remoteServices struct { // TODO: double -> mock
+type remoteServices struct {
 	identityAddress  string
 	sessionAddress   string
 	identityPort     int
 	sessionPort      int
-	identity         *identityDouble
-	session          *sessionDouble
+	identity         *identityMock
+	session          *sessionMock
 	identityServer   *grpc.Server
 	sessionServer    *grpc.Server
 	identityListener net.Listener
@@ -59,8 +59,8 @@ func startRemoteServices() (*remoteServices, error) {
 		sessionAddress:   fmt.Sprintf("host.testcontainers.internal:%d", sessionPort),
 		identityPort:     identityPort,
 		sessionPort:      sessionPort,
-		identity:         newIdentityDouble(),
-		session:          newSessionDouble(),
+		identity:         newIdentityMock(),
+		session:          newSessionMock(),
 		identityListener: identityListener,
 		sessionListener:  sessionListener,
 	}
@@ -89,17 +89,17 @@ func (r *remoteServices) Close() error {
 	return nil
 }
 
-type identityDouble struct {
+type identityMock struct {
 	identityapi.UnimplementedIdentityServiceServer
 	mu    sync.Mutex
 	users map[string]string
 }
 
-func newIdentityDouble() *identityDouble {
-	return &identityDouble{users: make(map[string]string)}
+func newIdentityMock() *identityMock {
+	return &identityMock{users: make(map[string]string)}
 }
 
-func (s *identityDouble) CreateUser(
+func (s *identityMock) CreateUser(
 	_ context.Context,
 	request *identityapi.CreateUserRequest,
 ) (*identityapi.CreateUserResponse, error) {
@@ -119,7 +119,7 @@ func (s *identityDouble) CreateUser(
 	return &identityapi.CreateUserResponse{UserId: userID}, nil
 }
 
-func (s *identityDouble) FindUserByLogin(
+func (s *identityMock) FindUserByLogin(
 	_ context.Context,
 	request *identityapi.FindUserByLoginRequest,
 ) (*identityapi.FindUserByLoginResponse, error) {
@@ -132,18 +132,18 @@ func (s *identityDouble) FindUserByLogin(
 	return &identityapi.FindUserByLoginResponse{UserId: userID}, nil
 }
 
-type sessionDouble struct {
+type sessionMock struct {
 	sessionapi.UnimplementedSessionServiceServer
 	mu        sync.Mutex
 	nextToken int
 	sessions  map[string]string
 }
 
-func newSessionDouble() *sessionDouble {
-	return &sessionDouble{sessions: make(map[string]string)}
+func newSessionMock() *sessionMock {
+	return &sessionMock{sessions: make(map[string]string)}
 }
 
-func (s *sessionDouble) CreateSession(
+func (s *sessionMock) CreateSession(
 	_ context.Context,
 	request *sessionapi.CreateSessionRequest,
 ) (*sessionapi.CreateSessionResponse, error) {
@@ -155,7 +155,7 @@ func (s *sessionDouble) CreateSession(
 	return &sessionapi.CreateSessionResponse{Token: token}, nil
 }
 
-func (s *sessionDouble) ResolveSession(
+func (s *sessionMock) ResolveSession(
 	_ context.Context,
 	request *sessionapi.ResolveSessionRequest,
 ) (*sessionapi.ResolveSessionResponse, error) {
@@ -168,7 +168,7 @@ func (s *sessionDouble) ResolveSession(
 	return &sessionapi.ResolveSessionResponse{UserId: userID}, nil
 }
 
-func (s *sessionDouble) RevokeSession(
+func (s *sessionMock) RevokeSession(
 	_ context.Context,
 	request *sessionapi.RevokeSessionRequest,
 ) (*sessionapi.RevokeSessionResponse, error) {
@@ -178,7 +178,7 @@ func (s *sessionDouble) RevokeSession(
 	return &sessionapi.RevokeSessionResponse{}, nil
 }
 
-func (s *sessionDouble) RevokeOthersByUserID(
+func (s *sessionMock) RevokeOthersByUserID(
 	_ context.Context,
 	request *sessionapi.RevokeOthersByUserIDRequest,
 ) (*sessionapi.RevokeOthersByUserIDResponse, error) {
@@ -195,13 +195,13 @@ func (s *sessionDouble) RevokeOthersByUserID(
 	return &sessionapi.RevokeOthersByUserIDResponse{}, nil
 }
 
-func (s *sessionDouble) sessionCount() int {
+func (s *sessionMock) sessionCount() int {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return len(s.sessions)
 }
 
-func (s *sessionDouble) active(token string) bool {
+func (s *sessionMock) active(token string) bool {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	_, exists := s.sessions[token]
