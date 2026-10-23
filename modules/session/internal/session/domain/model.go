@@ -2,9 +2,7 @@ package domain
 
 import (
 	"crypto/rand"
-	"crypto/sha256"
 	"encoding/base64"
-	"encoding/hex"
 	"errors"
 	"fmt"
 	"time"
@@ -12,33 +10,32 @@ import (
 )
 
 type SessionToken string
-type SessionTokenHash string
 
 type Session struct {
 	id        uuid.UUID
 	userID    uuid.UUID
-	tokenHash SessionTokenHash
+	token     SessionToken
 	expiresAt time.Time
 }
 
 type SessionData struct {
 	ID        uuid.UUID
 	UserID    uuid.UUID
-	TokenHash SessionTokenHash // TODO: хэш не нужен // device id
+	Token     SessionToken
 	ExpiresAt time.Time
 }
 
 var ErrInvalidSession = errors.New("invalid session data")
 
-func NewSession(id, userID uuid.UUID, tokenHash SessionTokenHash, expiresAt time.Time) (*Session, error) {
-	if id == uuid.Nil() || userID == uuid.Nil() || tokenHash == "" || expiresAt.IsZero() {
+func NewSession(id, userID uuid.UUID, token SessionToken, expiresAt time.Time) (*Session, error) {
+	if id == uuid.Nil() || userID == uuid.Nil() || token == "" || expiresAt.IsZero() {
 		return nil, ErrInvalidSession
 	}
 
 	return &Session{
 		id:        id,
 		userID:    userID,
-		tokenHash: tokenHash,
+		token:     token,
 		expiresAt: expiresAt,
 	}, nil
 }
@@ -47,7 +44,7 @@ func (s *Session) Data() SessionData {
 	return SessionData{
 		ID:        s.id,
 		UserID:    s.userID,
-		TokenHash: s.tokenHash,
+		Token:     s.token,
 		ExpiresAt: s.expiresAt,
 	}
 }
@@ -55,9 +52,9 @@ func (s *Session) Data() SessionData {
 type SessionRepository interface {
 	NextID() (uuid.UUID, error)
 	Store(*Session) error
-	FindByTokenHash(SessionTokenHash) (*Session, error)
-	RevokeByTokenHash(SessionTokenHash) error
-	RevokeOthersByUserID(uuid.UUID, SessionTokenHash) error
+	FindByToken(SessionToken) (*Session, error)
+	RevokeByToken(SessionToken) error
+	RevokeOthersByUserID(uuid.UUID, SessionToken) error
 }
 
 func (s *Session) IsExpired(now time.Time) bool {
@@ -72,9 +69,4 @@ func GenerateSessionToken() (SessionToken, error) {
 	}
 
 	return SessionToken(base64.RawURLEncoding.EncodeToString(bytes)), nil
-}
-
-func HashSessionToken(token SessionToken) SessionTokenHash {
-	hash := sha256.Sum256([]byte(token))
-	return SessionTokenHash(hex.EncodeToString(hash[:]))
 }

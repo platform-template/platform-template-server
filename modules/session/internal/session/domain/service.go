@@ -40,7 +40,7 @@ func (s *SessionService) Create(userID uuid.UUID) (SessionToken, error) {
 		return "", fmt.Errorf("create session: generate token: %w", err)
 	}
 
-	session, err := NewSession(id, userID, HashSessionToken(token), time.Now().UTC().Add(SessionTTL))
+	session, err := NewSession(id, userID, token, time.Now().UTC().Add(SessionTTL))
 	if err != nil {
 		return "", fmt.Errorf("create session: new session: %w", err)
 	}
@@ -57,9 +57,9 @@ func (s *SessionService) Resolve(token SessionToken) (uuid.UUID, error) {
 		return uuid.Nil(), fmt.Errorf("resolve session: %w", ErrInvalidToken)
 	}
 
-	session, err := s.repo.FindByTokenHash(HashSessionToken(token))
+	session, err := s.repo.FindByToken(token)
 	if err != nil {
-		return uuid.Nil(), fmt.Errorf("resolve session: find by token hash: %w", err)
+		return uuid.Nil(), fmt.Errorf("resolve session: find by token: %w", err)
 	}
 	if session == nil {
 		return uuid.Nil(), fmt.Errorf("resolve session: %w", ErrSessionNotFound)
@@ -76,7 +76,7 @@ func (s *SessionService) RevokeByToken(token SessionToken) error {
 		return fmt.Errorf("revoke session: %w", ErrInvalidToken)
 	}
 
-	if err := s.repo.RevokeByTokenHash(HashSessionToken(token)); err != nil {
+	if err := s.repo.RevokeByToken(token); err != nil {
 		return fmt.Errorf("revoke session: %w", err)
 	}
 
@@ -96,8 +96,7 @@ func (s *SessionService) RevokeOthersByUserID(userID uuid.UUID, token SessionTok
 		return fmt.Errorf("revoke other sessions: %w", ErrInvalidToken)
 	}
 
-	tokenHash := HashSessionToken(token)
-	if err := s.repo.RevokeOthersByUserID(userID, tokenHash); err != nil {
+	if err := s.repo.RevokeOthersByUserID(userID, token); err != nil {
 		return fmt.Errorf("revoke other sessions: %w", err)
 	}
 

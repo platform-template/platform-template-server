@@ -28,7 +28,7 @@ func (v version1791225168) Up(ctx context.Context) error {
 CREATE TABLE IF NOT EXISTS sessions (
     id CHAR(36) CHARACTER SET ascii NOT NULL PRIMARY KEY,
     user_id CHAR(36) CHARACTER SET ascii NOT NULL,
-    token_hash CHAR(64) CHARACTER SET ascii NOT NULL UNIQUE,
+    token VARCHAR(255) CHARACTER SET ascii NOT NULL UNIQUE,
     expires_at DATETIME(6) NOT NULL,
     created_at DATETIME(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6),
     INDEX idx_sessions_user_id (user_id)

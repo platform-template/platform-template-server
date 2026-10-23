@@ -13,7 +13,6 @@ import (
 	"google.golang.org/grpc/status"
 
 	sessionapi "session/api/server/internalapi"
-	"session/internal/session/domain"
 )
 
 func sessionClient(t *testing.T) sessionapi.SessionServiceClient {
@@ -31,7 +30,7 @@ func resolveSession(t *testing.T, client sessionapi.SessionServiceClient, token 
 	return response.GetUserId()
 }
 
-func TestSessionGRPCCreateResolveAndStoreHash(t *testing.T) {
+func TestSessionGRPCCreateResolveAndStoreToken(t *testing.T) {
 	client := sessionClient(t)
 	userID := uuid.New().String()
 	response, err := client.CreateSession(t.Context(), &sessionapi.CreateSessionRequest{UserId: userID})
@@ -39,12 +38,11 @@ func TestSessionGRPCCreateResolveAndStoreHash(t *testing.T) {
 	require.NotEmpty(t, response.GetToken())
 	require.Equal(t, userID, resolveSession(t, client, response.GetToken()))
 
-	var storedHash string
-	err = testEnv.connector.TransactionalClient().GetContext(t.Context(), "test.session.hash", &storedHash, `
-SELECT token_hash FROM sessions WHERE user_id = ?`, userID)
+	var storedToken string
+	err = testEnv.connector.TransactionalClient().GetContext(t.Context(), "test.session.token", &storedToken, `
+SELECT token FROM sessions WHERE user_id = ?`, userID)
 	require.NoError(t, err)
-	require.Equal(t, string(domain.HashSessionToken(domain.SessionToken(response.GetToken()))), storedHash)
-	require.NotEqual(t, response.GetToken(), storedHash)
+	require.Equal(t, response.GetToken(), storedToken)
 }
 
 func TestSessionGRPCRejectsUnknownAndExpiredTokens(t *testing.T) {
@@ -59,7 +57,7 @@ func TestSessionGRPCRejectsUnknownAndExpiredTokens(t *testing.T) {
 	created, err := client.CreateSession(t.Context(), &sessionapi.CreateSessionRequest{UserId: userID})
 	require.NoError(t, err)
 	_, err = testEnv.connector.TransactionalClient().ExecContext(t.Context(), "test.session.expire", `
-UPDATE sessions SET expires_at = ? WHERE token_hash = ?`, time.Now().UTC().Add(-time.Second), domain.HashSessionToken(domain.SessionToken(created.GetToken())))
+UPDATE sessions SET expires_at = ? WHERE token = ?`, time.Now().UTC().Add(-time.Second), created.GetToken())
 	require.NoError(t, err)
 	_, err = client.ResolveSession(t.Context(), &sessionapi.ResolveSessionRequest{Token: created.GetToken()})
 	require.Equal(t, codes.Unauthenticated, status.Code(err))

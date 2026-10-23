@@ -16,7 +16,7 @@ type fakeSessionRepository struct {
 	storeErr, findErr, revokeErr, revokeOthersErr error
 	session                                       *Session
 	stored                                        *Session
-	findHash, revokedHash, excludedHash           SessionTokenHash
+	findToken, revokedToken, excludedToken        SessionToken
 	revokedUserID                                 uuid.UUID
 	revokeOthersCalls                             int
 }
@@ -28,21 +28,21 @@ func (r *fakeSessionRepository) Store(s *Session) error {
 	r.stored = s
 	return r.storeErr
 }
-func (r *fakeSessionRepository) FindByTokenHash(hash SessionTokenHash) (*Session, error) {
-	r.findHash = hash
+func (r *fakeSessionRepository) FindByToken(token SessionToken) (*Session, error) {
+	r.findToken = token
 	return r.session, r.findErr
 }
-func (r *fakeSessionRepository) RevokeByTokenHash(hash SessionTokenHash) error {
-	r.revokedHash = hash
+func (r *fakeSessionRepository) RevokeByToken(token SessionToken) error {
+	r.revokedToken = token
 	return r.revokeErr
 }
-func (r *fakeSessionRepository) RevokeOthersByUserID(userID uuid.UUID, hash SessionTokenHash) error {
+func (r *fakeSessionRepository) RevokeOthersByUserID(userID uuid.UUID, token SessionToken) error {
 	r.revokeOthersCalls++
-	r.revokedUserID, r.excludedHash = userID, hash
+	r.revokedUserID, r.excludedToken = userID, token
 	return r.revokeOthersErr
 }
 
-func TestSessionServiceCreateStoresOnlyTokenHash(t *testing.T) {
+func TestSessionServiceCreateStoresToken(t *testing.T) {
 	userID := uuid.New()
 	repo := &fakeSessionRepository{nextID: uuid.New()}
 	token, err := NewSessionService(repo).Create(userID)
@@ -50,8 +50,7 @@ func TestSessionServiceCreateStoresOnlyTokenHash(t *testing.T) {
 	require.NotEmpty(t, token)
 	require.NotNil(t, repo.stored)
 	require.Equal(t, userID, repo.stored.Data().UserID)
-	require.Equal(t, HashSessionToken(token), repo.stored.Data().TokenHash)
-	require.NotEqual(t, string(token), string(repo.stored.Data().TokenHash))
+	require.Equal(t, token, repo.stored.Data().Token)
 }
 
 func TestSessionServiceResolve(t *testing.T) {
@@ -97,7 +96,7 @@ func TestSessionServiceResolve(t *testing.T) {
 			require.ErrorIs(t, err, tt.wantErr)
 			require.Equal(t, tt.wantID, got)
 			if tt.token != "" {
-				require.Equal(t, HashSessionToken(tt.token), repo.findHash)
+				require.Equal(t, tt.token, repo.findToken)
 			}
 		})
 	}
@@ -107,7 +106,7 @@ func TestSessionServiceRevokeByToken(t *testing.T) {
 	repo := &fakeSessionRepository{}
 	err := NewSessionService(repo).RevokeByToken("token")
 	require.NoError(t, err)
-	require.Equal(t, HashSessionToken("token"), repo.revokedHash)
+	require.Equal(t, SessionToken("token"), repo.revokedToken)
 	err = NewSessionService(repo).RevokeByToken("")
 	require.ErrorIs(t, err, ErrInvalidToken)
 }
@@ -125,7 +124,7 @@ func TestSessionServiceRevokeOthersKeepsCurrentValidSession(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, 1, repo.revokeOthersCalls)
 	require.Equal(t, userID, repo.revokedUserID)
-	require.Equal(t, HashSessionToken(token), repo.excludedHash)
+	require.Equal(t, token, repo.excludedToken)
 }
 
 func TestSessionServiceRevokeOthersRejectsForeignToken(t *testing.T) {
