@@ -6,6 +6,7 @@ import (
 	grpcserver "google.golang.org/grpc"
 	"google.golang.org/grpc/reflection"
 
+	interceptorgrpc "github.com/distributed-programming-2026/lib/gateway/interceptor"
 	"github.com/distributed-programming-2026/lib/runtime/grpc"
 	"github.com/distributed-programming-2026/lib/runtime/http"
 
@@ -14,8 +15,6 @@ import (
 	"session/internal/session/config"
 	interceptorhandler "session/internal/session/infra/handlers/interceptor"
 	internalhandler "session/internal/session/infra/handlers/internalapi"
-
-	interceptorgrpc "github.com/distributed-programming-2026/gateway/api/client/interceptorgrpc"
 )
 
 func newHTTPServer(_ *slog.Logger, conf config.Env, _ *app.Service) (*http.Server, error) {

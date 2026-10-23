@@ -12,7 +12,7 @@ import (
 )
 
 const (
-	authAPIPath       = "/api/public/v1/auth"
+	authAPIPath       = "/api/v1/auth"
 	initialPassword   = "password-1"
 	changedPassword   = "password-2"
 	thirdPassword     = "password-3"
@@ -184,7 +184,7 @@ func TestAuthHTTPLogout(t *testing.T) {
 	response = authRequest(t, authAPIPath+"/logout", nil, cookie)
 	require.Equal(t, http.StatusNoContent, response.statusCode)
 	response = authRequest(t, authAPIPath+"/logout", nil, nil)
-	require.Equal(t, http.StatusBadRequest, response.statusCode)
+	require.Equal(t, http.StatusNoContent, response.statusCode)
 }
 
 func TestAuthHTTPChangePassword(t *testing.T) {

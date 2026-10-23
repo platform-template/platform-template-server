@@ -8,7 +8,7 @@ import (
 	"testing"
 	"uuid"
 
-	interceptorgrpc "github.com/distributed-programming-2026/gateway/api/client/interceptorgrpc"
+	interceptorgrpc "github.com/distributed-programming-2026/lib/gateway/interceptor"
 	"github.com/stretchr/testify/require"
 
 	"session/internal/session/domain"

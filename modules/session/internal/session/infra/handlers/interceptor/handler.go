@@ -7,8 +7,8 @@ import (
 	"strings"
 	"uuid"
 
-	interceptorgrpc "github.com/distributed-programming-2026/gateway/api/client/interceptorgrpc"
 	"github.com/distributed-programming-2026/go-sdk/pkg/logging"
+	interceptorgrpc "github.com/distributed-programming-2026/lib/gateway/interceptor"
 
 	"session/internal/session/domain"
 )

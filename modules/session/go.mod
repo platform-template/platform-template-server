@@ -3,7 +3,6 @@ module session
 go 1.27.1
 
 require (
-	github.com/distributed-programming-2026/gateway v0.0.0
 	github.com/distributed-programming-2026/go-sdk/pkg/amqp v0.0.3
 	github.com/distributed-programming-2026/go-sdk/pkg/event v0.0.3
 	github.com/distributed-programming-2026/go-sdk/pkg/logging v0.0.3
@@ -87,5 +86,3 @@ require (
 )
 
 replace github.com/distributed-programming-2026/lib => ../../lib
-
-replace github.com/distributed-programming-2026/gateway => ../../../gateway
