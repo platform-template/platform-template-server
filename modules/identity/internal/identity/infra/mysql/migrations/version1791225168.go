@@ -29,7 +29,7 @@ CREATE TABLE IF NOT EXISTS users (
     id CHAR(36) CHARACTER SET ascii NOT NULL PRIMARY KEY,
     first_name VARCHAR(255) NOT NULL,
     last_name VARCHAR(255) NOT NULL,
-    middle_name VARCHAR(255) NOT NULL,
+    middle_name VARCHAR(255) NULL,
     login VARCHAR(255) NOT NULL UNIQUE,
     email VARCHAR(254) NOT NULL
 ) ENGINE=InnoDB CHARACTER SET=utf8mb4 COLLATE=utf8mb4_unicode_ci;

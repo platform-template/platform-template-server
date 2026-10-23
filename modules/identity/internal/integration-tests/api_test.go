@@ -2,6 +2,7 @@ package integration_tests
 
 import (
 	"context"
+	"database/sql"
 	"testing"
 	"time"
 
@@ -15,6 +16,10 @@ import (
 )
 
 const testUserLogin = "ada-lovelace"
+
+func stringPointer(value string) *string {
+	return &value
+}
 
 func identityClient(t *testing.T) identityapi.IdentityServiceClient {
 	t.Helper()
@@ -32,7 +37,7 @@ func TestIdentityGRPCUserLifecycle(t *testing.T) {
 	created, err := client.CreateUser(ctx, &identityapi.CreateUserRequest{
 		FirstName:  "Ada",
 		LastName:   "Lovelace",
-		MiddleName: "Byron",
+		MiddleName: stringPointer("Byron"),
 		Login:      testUserLogin,
 		Email:      "ada@example.com",
 	})
@@ -40,11 +45,11 @@ func TestIdentityGRPCUserLifecycle(t *testing.T) {
 	require.NotEmpty(t, created.GetUserId())
 
 	var stored struct {
-		FirstName  string `db:"first_name"`
-		LastName   string `db:"last_name"`
-		MiddleName string `db:"middle_name"`
-		Login      string `db:"login"`
-		Email      string `db:"email"`
+		FirstName  string  `db:"first_name"`
+		LastName   string  `db:"last_name"`
+		MiddleName *string `db:"middle_name"`
+		Login      string  `db:"login"`
+		Email      string  `db:"email"`
 	}
 	err = testEnv.connector.TransactionalClient().GetContext(t.Context(), "test.identity.user", &stored, `
 SELECT first_name, last_name, middle_name, login, email
@@ -53,7 +58,8 @@ WHERE id = ?`, created.GetUserId())
 	require.NoError(t, err)
 	require.Equal(t, "Ada", stored.FirstName)
 	require.Equal(t, "Lovelace", stored.LastName)
-	require.Equal(t, "Byron", stored.MiddleName)
+	require.NotNil(t, stored.MiddleName)
+	require.Equal(t, "Byron", *stored.MiddleName)
 	require.Equal(t, testUserLogin, stored.Login)
 	require.Equal(t, "ada@example.com", stored.Email)
 
@@ -85,4 +91,24 @@ func TestIdentityGRPCRejectsMissingAndInvalidUsers(t *testing.T) {
 		Email:     "not-an-email",
 	})
 	require.Equal(t, codes.InvalidArgument, status.Code(err))
+}
+
+func TestIdentityGRPCAcceptsMissingMiddleName(t *testing.T) {
+	client := identityClient(t)
+	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
+	defer cancel()
+
+	created, err := client.CreateUser(ctx, &identityapi.CreateUserRequest{
+		FirstName: "No",
+		LastName:  "Middle",
+		Login:     "no-middle-name",
+		Email:     "no-middle-name@example.com",
+	})
+	require.NoError(t, err)
+
+	var middleName sql.NullString
+	err = testEnv.connector.TransactionalClient().GetContext(t.Context(), "test.identity.middle-name", &middleName, `
+SELECT middle_name FROM users WHERE id = ?`, created.GetUserId())
+	require.NoError(t, err)
+	require.False(t, middleName.Valid)
 }

@@ -49,7 +49,8 @@ VALUES (?, ?, ?, ?, ?, ?)
 }
 
 func (r *identityRepository) FindByLogin(login string) (*domain.User, error) {
-	var id, firstName, lastName, middleName, storedLogin, email string
+	var id, firstName, lastName, storedLogin, email string
+	var middleName sql.NullString
 
 	err := r.client.QueryRowContext(r.ctx, "identity.find_by_login", `
 SELECT id, first_name, last_name, middle_name, login, email
@@ -69,7 +70,7 @@ WHERE login = ?
 		return nil, fmt.Errorf("parse user ID: %w", err)
 	}
 
-	user, err := domain.NewUser(userID, firstName, lastName, middleName, storedLogin, domain.Email(email))
+	user, err := domain.NewUser(userID, firstName, lastName, nullableString(middleName), storedLogin, domain.Email(email))
 	if err != nil {
 		return nil, fmt.Errorf("restore user: %w", err)
 	}
@@ -100,7 +101,8 @@ WHERE id = ?
 }
 
 func (r *identityRepository) findOne(queryName, query, argument string) (*domain.User, error) {
-	var id, firstName, lastName, middleName, storedLogin, email string
+	var id, firstName, lastName, storedLogin, email string
+	var middleName sql.NullString
 
 	err := r.client.QueryRowContext(
 		r.ctx,
@@ -130,7 +132,7 @@ func (r *identityRepository) findOne(queryName, query, argument string) (*domain
 		parsedID,
 		firstName,
 		lastName,
-		middleName,
+		nullableString(middleName),
 		storedLogin,
 		domain.Email(email),
 	)
@@ -139,4 +141,11 @@ func (r *identityRepository) findOne(queryName, query, argument string) (*domain
 	}
 
 	return user, nil
+}
+
+func nullableString(value sql.NullString) *string {
+	if !value.Valid {
+		return nil
+	}
+	return &value.String
 }

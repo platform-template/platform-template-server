@@ -11,7 +11,7 @@ service IdentityService {
 message CreateUserRequest {
   string first_name = 1;
   string last_name = 2;
-  string middle_name = 3;
+  optional string middle_name = 3;
   string login = 4;
   string email = 5;
 }

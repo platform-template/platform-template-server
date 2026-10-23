@@ -3,6 +3,7 @@ package identity
 import (
 	"context"
 	"fmt"
+	"strings"
 	"uuid"
 
 	"google.golang.org/grpc"
@@ -30,7 +31,7 @@ func (c *Client) Create(ctx context.Context, firstName, lastName, middleName, lo
 	resp, err := c.client.CreateUser(ctx, &identityapi.CreateUserRequest{
 		FirstName:  firstName,
 		LastName:   lastName,
-		MiddleName: middleName,
+		MiddleName: optionalString(middleName),
 		Login:      login,
 		Email:      email,
 	})
@@ -51,6 +52,14 @@ func (c *Client) Create(ctx context.Context, firstName, lastName, middleName, lo
 	}
 
 	return userID, nil
+}
+
+func optionalString(value string) *string {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return nil
+	}
+	return &value
 }
 
 func (c *Client) FindByLogin(ctx context.Context, login string) (uuid.UUID, error) {

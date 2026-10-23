@@ -25,7 +25,7 @@ func NewIdentityService(repo IdentityRepository) *IdentityService {
 func (s *IdentityService) Create(
 	firstName string,
 	lastName string,
-	middleName string,
+	middleName *string,
 	login string,
 	email string,
 ) (uuid.UUID, error) {
@@ -106,8 +106,8 @@ func (s *IdentityService) FindByID(userID uuid.UUID) (*User, error) {
 func (s *IdentityService) Update(
 	userID uuid.UUID,
 	firstName,
-	lastName,
-	middleName,
+	lastName string,
+	middleName *string,
 	email string,
 ) (*User, error) {
 	current, err := s.FindByID(userID)

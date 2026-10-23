@@ -122,7 +122,7 @@ func TestNewUserValidatesRequiredFields(t *testing.T) {
 				tt.id,
 				tt.firstName,
 				tt.lastName,
-				"",
+				nil,
 				tt.login,
 				Email(tt.email),
 			)

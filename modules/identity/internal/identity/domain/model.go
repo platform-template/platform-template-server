@@ -36,7 +36,7 @@ type User struct {
 	id         uuid.UUID
 	firstName  string
 	lastName   string
-	middleName string // TODO: указатель при пустоте (maybe?)
+	middleName *string
 	login      string
 	email      Email
 }
@@ -45,13 +45,13 @@ func NewUser(
 	id uuid.UUID,
 	firstName string,
 	lastName string,
-	middleName string,
+	middleName *string,
 	login string,
 	email Email,
 ) (*User, error) {
 	firstName = strings.TrimSpace(firstName)
 	lastName = strings.TrimSpace(lastName)
-	middleName = strings.TrimSpace(middleName)
+	middleName = optionalString(middleName)
 	login = strings.TrimSpace(login)
 
 	if id == uuid.Nil() {
@@ -85,9 +85,20 @@ type UserData struct {
 	ID         uuid.UUID
 	FirstName  string
 	LastName   string
-	MiddleName string
+	MiddleName *string
 	Login      string
 	Email      Email
+}
+
+func optionalString(value *string) *string {
+	if value == nil {
+		return nil
+	}
+	trimmed := strings.TrimSpace(*value)
+	if trimmed == "" {
+		return nil
+	}
+	return &trimmed
 }
 
 func (u *User) Data() *UserData {

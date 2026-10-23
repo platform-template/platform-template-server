@@ -72,7 +72,7 @@ func TestIdentityService_Create(t *testing.T) {
 	id, err := service.Create(
 		"  Alex  ",
 		"  Smith  ",
-		"  James  ",
+		stringPointer("  James  "),
 		"  alex  ",
 		"  alex@example.com  ",
 	)
@@ -89,7 +89,8 @@ func TestIdentityService_Create(t *testing.T) {
 	assert.Equal(t, expectedID, user.id)
 	assert.Equal(t, "Alex", user.firstName)
 	assert.Equal(t, "Smith", user.lastName)
-	assert.Equal(t, "James", user.middleName)
+	require.NotNil(t, user.middleName)
+	assert.Equal(t, "James", *user.middleName)
 	assert.Equal(t, testAlexLogin, user.login)
 	assert.Equal(t, Email("alex@example.com"), user.email)
 }
@@ -97,7 +98,7 @@ func TestIdentityService_Create(t *testing.T) {
 type createInput struct {
 	firstName  string
 	lastName   string
-	middleName string
+	middleName *string
 	login      string
 	email      string
 }
@@ -106,7 +107,7 @@ func validCreateInput() createInput {
 	return createInput{
 		firstName:  "Alex",
 		lastName:   "Smith",
-		middleName: "",
+		middleName: nil,
 		login:      testAlexLogin,
 		email:      "alex@example.com",
 	}
@@ -323,19 +324,19 @@ func TestIdentityService_Update(t *testing.T) {
 	)
 
 	userID := uuid.New()
-	current, err := NewUser(userID, "Alex", "Smith", "", testAlexLogin, Email("alex@example.com"))
+	current, err := NewUser(userID, "Alex", "Smith", nil, testAlexLogin, Email("alex@example.com"))
 	require.NoError(t, err)
 
 	tests := []struct {
 		name    string
 		first   string
 		last    string
-		middle  string
+		middle  *string
 		email   string
 		found   *User
 		wantErr error
 	}{
-		{name: "updates profile", first: updatedFirstName, last: updatedLastName, middle: "Lee", email: updatedEmail, found: current},
+		{name: "updates profile", first: updatedFirstName, last: updatedLastName, middle: stringPointer("Lee"), email: updatedEmail, found: current},
 		{name: "missing user", first: updatedFirstName, last: updatedLastName, email: updatedEmail, wantErr: ErrUserNotFound},
 		{name: "empty first name", first: "", last: updatedLastName, email: updatedEmail, found: current, wantErr: ErrInvalidFirstName},
 		{name: "invalid email", first: updatedFirstName, last: updatedLastName, email: "invalid", found: current, wantErr: ErrInvalidEmail},
@@ -349,8 +350,17 @@ func TestIdentityService_Update(t *testing.T) {
 			if tt.wantErr == nil {
 				require.NotNil(t, repo.updatedUser)
 				require.Equal(t, testAlexLogin, repo.updatedUser.login)
-				require.Equal(t, tt.middle, repo.updatedUser.middleName)
+				if tt.middle == nil {
+					require.Nil(t, repo.updatedUser.middleName)
+				} else {
+					require.NotNil(t, repo.updatedUser.middleName)
+					require.Equal(t, *tt.middle, *repo.updatedUser.middleName)
+				}
 			}
 		})
 	}
+}
+
+func stringPointer(value string) *string {
+	return &value
 }

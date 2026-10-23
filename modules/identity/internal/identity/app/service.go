@@ -22,8 +22,8 @@ func NewService(unit uow.UnitOfWorkWithRepositoryProvider[*mysql.RepositoryProvi
 func (s *Service) Create(
 	ctx context.Context,
 	firstName,
-	lastName,
-	middleName,
+	lastName string,
+	middleName *string,
 	login,
 	email string,
 ) (uuid.UUID, error) {
@@ -82,7 +82,10 @@ func (s *Service) FindByID(ctx context.Context, userID uuid.UUID) (*domain.User,
 func (s *Service) Update(
 	ctx context.Context,
 	userID uuid.UUID,
-	firstName, lastName, middleName, email string,
+	firstName,
+	lastName string,
+	middleName *string,
+	email string,
 ) (*domain.User, error) {
 	var user *domain.User
 

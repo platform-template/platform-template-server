@@ -35,7 +35,7 @@ func (h handler) CreateUser(
 		ctx,
 		req.GetFirstName(),
 		req.GetLastName(),
-		req.GetMiddleName(),
+		req.MiddleName,
 		req.GetLogin(),
 		req.GetEmail(),
 	)
