@@ -26,21 +26,13 @@ func (s *IdentityService) Create(
 	firstName string,
 	lastName string,
 	middleName *string,
-	login string,
+	loginSnapshot string,
 	email string,
 ) (uuid.UUID, error) {
-	login = strings.TrimSpace(login)
-	if login == "" {
+	loginSnapshot = strings.TrimSpace(loginSnapshot)
+	if loginSnapshot == "" {
 		return uuid.Nil(), fmt.Errorf("create user: %w", ErrInvalidLogin)
 	}
-	foundUser, err := s.repo.FindByLogin(login)
-	if err != nil {
-		return uuid.Nil(), fmt.Errorf("create user: find by login: %w", err)
-	}
-	if foundUser != nil {
-		return uuid.Nil(), fmt.Errorf("create user: %w", ErrLoginAlreadyExists)
-	}
-
 	id, err := s.repo.NextID()
 	if err != nil {
 		return uuid.Nil(), err
@@ -56,7 +48,7 @@ func (s *IdentityService) Create(
 		firstName,
 		lastName,
 		middleName,
-		login,
+		loginSnapshot,
 		verifiedEmail,
 	)
 	if err != nil {
@@ -70,13 +62,13 @@ func (s *IdentityService) Create(
 	return id, nil
 }
 
-func (s *IdentityService) FindByLogin(login string) (*User, error) {
-	login = strings.TrimSpace(login)
-	if login == "" {
+func (s *IdentityService) FindByLoginSnapshot(loginSnapshot string) (*User, error) {
+	loginSnapshot = strings.TrimSpace(loginSnapshot)
+	if loginSnapshot == "" {
 		return nil, fmt.Errorf("find user by login: %w", ErrInvalidLogin)
 	}
 
-	user, err := s.repo.FindByLogin(login)
+	user, err := s.repo.FindByLoginSnapshot(loginSnapshot)
 	if err != nil {
 		return nil, fmt.Errorf("find user by login: %w", err)
 	}
@@ -120,7 +112,7 @@ func (s *IdentityService) Update(
 		firstName,
 		lastName,
 		middleName,
-		current.Data().Login,
+		current.Data().LoginSnapshot,
 		Email(email),
 	)
 	if err != nil {

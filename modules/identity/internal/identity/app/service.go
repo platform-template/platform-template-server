@@ -24,7 +24,7 @@ func (s *Service) Create(
 	firstName,
 	lastName string,
 	middleName *string,
-	login,
+	loginSnapshot,
 	email string,
 ) (uuid.UUID, error) {
 	var userID uuid.UUID
@@ -33,7 +33,7 @@ func (s *Service) Create(
 		svc := domain.NewIdentityService(provider.Identity(ctx))
 
 		var err error
-		userID, err = svc.Create(firstName, lastName, middleName, login, email)
+		userID, err = svc.Create(firstName, lastName, middleName, loginSnapshot, email)
 		return err
 	})
 	if err != nil {
@@ -43,13 +43,13 @@ func (s *Service) Create(
 	return userID, nil
 }
 
-func (s *Service) FindByLogin(ctx context.Context, login string) (uuid.UUID, error) {
+func (s *Service) FindByLoginSnapshot(ctx context.Context, loginSnapshot string) (uuid.UUID, error) {
 	var userID uuid.UUID
 
 	err := s.unit.ExecuteWithRepositoryProvider(ctx, func(provider *mysql.RepositoryProvider) error {
 		svc := domain.NewIdentityService(provider.Identity(ctx))
 
-		user, err := svc.FindByLogin(login)
+		user, err := svc.FindByLoginSnapshot(loginSnapshot)
 		if err != nil {
 			return err
 		}

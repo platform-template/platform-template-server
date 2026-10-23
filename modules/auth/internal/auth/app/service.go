@@ -65,7 +65,7 @@ func (s *Service) Register(ctx context.Context, input RegisterInput) (uuid.UUID,
 
 	err = s.unit.ExecuteWithRepositoryProvider(ctx, func(provider *mysql.RepositoryProvider) error {
 		svc := domain.NewAuthService(provider.Auth(ctx), s.passwordHasher)
-		return svc.Create(userID, input.Password)
+		return svc.Create(userID, input.Login, input.Password)
 	})
 	if err != nil {
 		return uuid.Nil(), fmt.Errorf("register: create auth cred: %w", err)
@@ -75,19 +75,14 @@ func (s *Service) Register(ctx context.Context, input RegisterInput) (uuid.UUID,
 }
 
 func (s *Service) Login(ctx context.Context, login, password string) (string, error) {
-	userID, err := s.identity.FindByLogin(ctx, login)
-	if errors.Is(err, ErrUserNotFound) {
-		return "", fmt.Errorf("login: %w", ErrInvalidCredentials)
-	}
-	if err != nil {
-		return "", fmt.Errorf("login: find by login: %w", err)
-	}
-
-	var match bool
-	err = s.unit.ExecuteWithRepositoryProvider(ctx, func(provider *mysql.RepositoryProvider) error {
+	var (
+		userID uuid.UUID
+		match  bool
+	)
+	err := s.unit.ExecuteWithRepositoryProvider(ctx, func(provider *mysql.RepositoryProvider) error {
 		svc := domain.NewAuthService(provider.Auth(ctx), s.passwordHasher)
 		var err error
-		match, err = svc.Check(userID, password)
+		userID, match, err = svc.Check(login, password)
 		return err
 	})
 	if err != nil {
@@ -133,7 +128,7 @@ func (s *Service) ChangePassword(
 	err = s.unit.ExecuteWithRepositoryProvider(ctx, func(provider *mysql.RepositoryProvider) error {
 		svc := domain.NewAuthService(provider.Auth(ctx), s.passwordHasher)
 
-		match, err := svc.Check(userID, oldPassword)
+		match, err := svc.CheckByUserID(userID, oldPassword)
 		if err != nil {
 			return fmt.Errorf("check old password: %w", err)
 		}

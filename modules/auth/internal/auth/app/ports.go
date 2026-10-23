@@ -7,7 +7,6 @@ import (
 
 type IdentityClient interface {
 	Create(ctx context.Context, firstName, lastName, middleName, login, email string) (uuid.UUID, error)
-	FindByLogin(ctx context.Context, login string) (uuid.UUID, error)
 }
 
 type SessionClient interface {

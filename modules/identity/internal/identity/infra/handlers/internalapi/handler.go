@@ -63,7 +63,7 @@ func (h handler) FindUserByLogin(
 	ctx context.Context,
 	req *identityinternalapi.FindUserByLoginRequest,
 ) (*identityinternalapi.FindUserByLoginResponse, error) {
-	userID, err := h.svc.FindByLogin(ctx, req.GetLogin())
+	userID, err := h.svc.FindByLoginSnapshot(ctx, req.GetLogin())
 	if err != nil {
 		switch {
 		case errors.Is(err, domain.ErrUserNotFound):

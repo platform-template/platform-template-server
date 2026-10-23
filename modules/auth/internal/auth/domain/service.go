@@ -2,6 +2,7 @@ package domain
 
 import (
 	"fmt"
+	"strings"
 	"uuid"
 )
 
@@ -17,7 +18,7 @@ func NewAuthService(repo AuthRepository, hasher PasswordHasher) *AuthService {
 	}
 }
 
-func (s *AuthService) Create(userID uuid.UUID, password string) error {
+func (s *AuthService) Create(userID uuid.UUID, login, password string) error {
 	if userID == uuid.Nil() {
 		return fmt.Errorf("create auth: %w", ErrInvalidUserID)
 	}
@@ -40,7 +41,7 @@ func (s *AuthService) Create(userID uuid.UUID, password string) error {
 		return fmt.Errorf("create auth: hasher: %w", err)
 	}
 
-	auth, err = NewPasswordCredential(userID, passwordHash)
+	auth, err = NewPasswordCredential(userID, login, passwordHash)
 	if err != nil {
 		return fmt.Errorf("create auth: creating credential: %w", err)
 	}
@@ -53,7 +54,29 @@ func (s *AuthService) Create(userID uuid.UUID, password string) error {
 	return nil
 }
 
-func (s *AuthService) Check(userID uuid.UUID, password string) (bool, error) {
+func (s *AuthService) Check(login, password string) (uuid.UUID, bool, error) {
+	login = strings.TrimSpace(login)
+	if login == "" {
+		return uuid.Nil(), false, fmt.Errorf("check auth: %w", ErrInvalidLogin)
+	}
+
+	credential, err := s.repo.FindByLogin(login)
+	if err != nil {
+		return uuid.Nil(), false, fmt.Errorf("check auth: find by login: %w", err)
+	}
+	if credential == nil {
+		return uuid.Nil(), false, fmt.Errorf("check auth: %w", ErrCredentialNotFound)
+	}
+
+	match, err := s.hasher.Verify(password, credential.passwordHash)
+	if err != nil {
+		return uuid.Nil(), false, fmt.Errorf("check auth: verify password: %w", err)
+	}
+
+	return credential.userID, match, nil
+}
+
+func (s *AuthService) CheckByUserID(userID uuid.UUID, password string) (bool, error) {
 	if userID == uuid.Nil() {
 		return false, fmt.Errorf("check auth: %w", ErrInvalidUserID)
 	}

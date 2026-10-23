@@ -130,7 +130,7 @@ func TestNewUserValidatesRequiredFields(t *testing.T) {
 			if tt.wantErr == nil {
 				require.NotNil(t, user)
 				require.Equal(t, testFirstName, user.Data().FirstName)
-				require.Equal(t, testLogin, user.Data().Login)
+				require.Equal(t, testLogin, user.Data().LoginSnapshot)
 			}
 		})
 	}

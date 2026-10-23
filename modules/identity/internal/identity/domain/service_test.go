@@ -41,7 +41,7 @@ func (f *fakeIdentityRepository) Store(user *User) error {
 	return f.storeErr
 }
 
-func (f *fakeIdentityRepository) FindByLogin(login string) (*User, error) {
+func (f *fakeIdentityRepository) FindByLoginSnapshot(login string) (*User, error) {
 	f.findCalls++
 	f.foundLogin = login
 	return f.existingUser, f.findErr
@@ -79,10 +79,10 @@ func TestIdentityService_Create(t *testing.T) {
 
 	require.NoError(t, err)
 	assert.Equal(t, expectedID, id)
-	assert.Equal(t, 1, repo.findCalls, "FindByLogin calls")
+	assert.Zero(t, repo.findCalls, "identity must not check login uniqueness")
 	assert.Equal(t, 1, repo.nextIDCalls, "NextID calls")
 	assert.Equal(t, 1, repo.storeCalls, "Store calls")
-	assert.Equal(t, testAlexLogin, repo.foundLogin)
+	assert.Empty(t, repo.foundLogin)
 	require.NotNil(t, repo.storedUser)
 
 	user := repo.storedUser
@@ -91,7 +91,7 @@ func TestIdentityService_Create(t *testing.T) {
 	assert.Equal(t, "Smith", user.lastName)
 	require.NotNil(t, user.middleName)
 	assert.Equal(t, "James", *user.middleName)
-	assert.Equal(t, testAlexLogin, user.login)
+	assert.Equal(t, testAlexLogin, user.loginSnapshot)
 	assert.Equal(t, Email("alex@example.com"), user.email)
 }
 
@@ -114,7 +114,6 @@ func validCreateInput() createInput {
 }
 
 func TestIdentityService_Create_Errors(t *testing.T) {
-	findErr := errors.New("find failed")
 	nextIDErr := errors.New("next ID failed")
 	storeErr := errors.New("store failed")
 
@@ -142,28 +141,11 @@ func TestIdentityService_Create_Errors(t *testing.T) {
 			wantErr: ErrInvalidLogin,
 		},
 		{
-			name: "login already exists",
-			modifyRepo: func(r *fakeIdentityRepository) {
-				r.existingUser = &User{}
-			},
-			wantErr:  ErrLoginAlreadyExists,
-			wantFind: 1,
-		},
-		{
-			name: "find error",
-			modifyRepo: func(r *fakeIdentityRepository) {
-				r.findErr = findErr
-			},
-			wantErr:  findErr,
-			wantFind: 1,
-		},
-		{
 			name: "next ID error",
 			modifyRepo: func(r *fakeIdentityRepository) {
 				r.nextIDErr = nextIDErr
 			},
 			wantErr:    nextIDErr,
-			wantFind:   1,
 			wantNextID: 1,
 		},
 		{
@@ -172,7 +154,6 @@ func TestIdentityService_Create_Errors(t *testing.T) {
 				i.email = "invalid-email"
 			},
 			wantErr:    ErrInvalidEmail,
-			wantFind:   1,
 			wantNextID: 1,
 		},
 		{
@@ -181,7 +162,6 @@ func TestIdentityService_Create_Errors(t *testing.T) {
 				i.firstName = ""
 			},
 			wantErr:    ErrInvalidFirstName,
-			wantFind:   1,
 			wantNextID: 1,
 		},
 		{
@@ -190,7 +170,6 @@ func TestIdentityService_Create_Errors(t *testing.T) {
 				i.lastName = testWhitespace
 			},
 			wantErr:    ErrInvalidLastName,
-			wantFind:   1,
 			wantNextID: 1,
 		},
 		{
@@ -199,7 +178,6 @@ func TestIdentityService_Create_Errors(t *testing.T) {
 				r.storeErr = storeErr
 			},
 			wantErr:    storeErr,
-			wantFind:   1,
 			wantNextID: 1,
 			wantStore:  1,
 		},
@@ -245,7 +223,7 @@ func TestIdentityService_Create_Errors(t *testing.T) {
 }
 
 func TestIdentityService_FindByLogin(t *testing.T) {
-	existingUser := &User{login: testAlexLogin}
+	existingUser := &User{loginSnapshot: testAlexLogin}
 	findErr := errors.New("find failed")
 
 	tests := []struct {
@@ -299,7 +277,7 @@ func TestIdentityService_FindByLogin(t *testing.T) {
 			}
 			service := NewIdentityService(repo)
 
-			user, err := service.FindByLogin(tt.login)
+			user, err := service.FindByLoginSnapshot(tt.login)
 
 			require.ErrorIs(t, err, tt.wantErr)
 
@@ -349,7 +327,7 @@ func TestIdentityService_Update(t *testing.T) {
 			require.ErrorIs(t, err, tt.wantErr)
 			if tt.wantErr == nil {
 				require.NotNil(t, repo.updatedUser)
-				require.Equal(t, testAlexLogin, repo.updatedUser.login)
+				require.Equal(t, testAlexLogin, repo.updatedUser.loginSnapshot)
 				if tt.middle == nil {
 					require.Nil(t, repo.updatedUser.middleName)
 				} else {

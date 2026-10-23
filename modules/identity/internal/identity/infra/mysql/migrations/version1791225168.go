@@ -30,7 +30,7 @@ CREATE TABLE IF NOT EXISTS users (
     first_name VARCHAR(255) NOT NULL,
     last_name VARCHAR(255) NOT NULL,
     middle_name VARCHAR(255) NULL,
-    login VARCHAR(255) NOT NULL UNIQUE,
+    login_snapshot VARCHAR(255) NOT NULL,
     email VARCHAR(254) NOT NULL
 ) ENGINE=InnoDB CHARACTER SET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 `)

@@ -10,36 +10,48 @@ import (
 )
 
 func TestNewPasswordCredential(t *testing.T) {
+	const passwordHash = "password-hash"
+
 	validID := uuid.New()
 
 	tests := []struct {
 		name    string
 		userID  uuid.UUID
+		login   string
 		hash    string
 		wantErr error
 	}{
 		{
 			name:   "valid credential",
 			userID: validID,
-			hash:   "password-hash",
+			login:  testLogin,
+			hash:   passwordHash,
 		},
 		{
 			name:    "invalid user ID",
 			userID:  uuid.Nil(),
-			hash:    "password-hash",
+			login:   testLogin,
+			hash:    passwordHash,
 			wantErr: ErrInvalidUserID,
 		},
 		{
 			name:    "empty password hash",
 			userID:  validID,
+			login:   testLogin,
 			hash:    "",
 			wantErr: ErrInvalidPasswordHash,
+		},
+		{
+			name:    "empty login",
+			userID:  validID,
+			hash:    passwordHash,
+			wantErr: ErrInvalidLogin,
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			credential, err := NewPasswordCredential(tt.userID, tt.hash)
+			credential, err := NewPasswordCredential(tt.userID, tt.login, tt.hash)
 
 			require.ErrorIs(t, err, tt.wantErr)
 
@@ -51,6 +63,7 @@ func TestNewPasswordCredential(t *testing.T) {
 			require.NotNil(t, credential)
 
 			assert.Equal(t, tt.userID, credential.userID)
+			assert.Equal(t, tt.login, credential.login)
 
 			assert.Equal(t, tt.hash, credential.passwordHash)
 		})
@@ -80,8 +93,9 @@ func TestPasswordCredential_ChangePasswordHash(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			credential := &PasswordCredential{
-				userID:       uuid.New(),
-				passwordHash: testOldHash,
+				userID:        uuid.New(),
+				login:        testLogin,
+				passwordHash:  testOldHash,
 			}
 
 			err := credential.changePasswordHash(tt.newHash)

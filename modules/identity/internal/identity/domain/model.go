@@ -33,12 +33,12 @@ func (e Email) String() string {
 }
 
 type User struct {
-	id         uuid.UUID
-	firstName  string
-	lastName   string
-	middleName *string
-	login      string
-	email      Email
+	id            uuid.UUID
+	firstName     string
+	lastName      string
+	middleName    *string
+	loginSnapshot string
+	email         Email
 }
 
 func NewUser(
@@ -46,13 +46,13 @@ func NewUser(
 	firstName string,
 	lastName string,
 	middleName *string,
-	login string,
+	loginSnapshot string,
 	email Email,
 ) (*User, error) {
 	firstName = strings.TrimSpace(firstName)
 	lastName = strings.TrimSpace(lastName)
 	middleName = optionalString(middleName)
-	login = strings.TrimSpace(login)
+	loginSnapshot = strings.TrimSpace(loginSnapshot)
 
 	if id == uuid.Nil() {
 		return nil, ErrInvalidUserID
@@ -63,7 +63,7 @@ func NewUser(
 	if lastName == "" {
 		return nil, ErrInvalidLastName
 	}
-	if login == "" {
+	if loginSnapshot == "" {
 		return nil, ErrInvalidLogin
 	}
 	validatedEmail, err := NewEmail(string(email))
@@ -72,22 +72,22 @@ func NewUser(
 	}
 
 	return &User{
-		id:         id,
-		firstName:  firstName,
-		lastName:   lastName,
-		middleName: middleName,
-		login:      login,
-		email:      validatedEmail,
+		id:            id,
+		firstName:     firstName,
+		lastName:      lastName,
+		middleName:    middleName,
+		loginSnapshot: loginSnapshot,
+		email:         validatedEmail,
 	}, nil
 }
 
 type UserData struct {
-	ID         uuid.UUID
-	FirstName  string
-	LastName   string
-	MiddleName *string
-	Login      string
-	Email      Email
+	ID            uuid.UUID
+	FirstName     string
+	LastName      string
+	MiddleName    *string
+	LoginSnapshot string
+	Email         Email
 }
 
 func optionalString(value *string) *string {
@@ -103,19 +103,19 @@ func optionalString(value *string) *string {
 
 func (u *User) Data() *UserData {
 	return &UserData{
-		ID:         u.id,
-		FirstName:  u.firstName,
-		LastName:   u.lastName,
-		MiddleName: u.middleName,
-		Login:      u.login,
-		Email:      u.email,
+		ID:            u.id,
+		FirstName:     u.firstName,
+		LastName:      u.lastName,
+		MiddleName:    u.middleName,
+		LoginSnapshot: u.loginSnapshot,
+		Email:         u.email,
 	}
 }
 
 type IdentityRepository interface {
 	NextID() (uuid.UUID, error)
 	Store(*User) error
-	FindByLogin(string) (*User, error)
+	FindByLoginSnapshot(string) (*User, error)
 	FindByID(uuid.UUID) (*User, error)
 	Update(*User) error
 }

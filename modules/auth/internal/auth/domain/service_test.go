@@ -25,6 +25,10 @@ func (f *fakeAuthRepository) FindByUserID(_ uuid.UUID) (*PasswordCredential, err
 	return f.credential, nil
 }
 
+func (f *fakeAuthRepository) FindByLogin(_ string) (*PasswordCredential, error) {
+	return f.credential, nil
+}
+
 func (f *fakeAuthRepository) Store(credential *PasswordCredential) error {
 	f.storeCalls++
 	f.stored = credential
@@ -102,13 +106,14 @@ func TestAuthService_Create(t *testing.T) {
 			if tt.existing {
 				repo.credential = &PasswordCredential{
 					userID:       userID,
+					login:        testLogin,
 					passwordHash: testOldHash,
 				}
 			}
 			hasher := &fakePasswordHasher{hashResult: "created-hash"}
 			service := NewAuthService(repo, hasher)
 
-			err := service.Create(userID, tt.password)
+			err := service.Create(userID, testLogin, tt.password)
 			require.ErrorIs(t, err, tt.wantErr)
 
 			if tt.wantErr != nil {
@@ -120,6 +125,7 @@ func TestAuthService_Create(t *testing.T) {
 
 			require.NotNil(t, repo.stored)
 			assert.Equal(t, userID, repo.stored.userID)
+			assert.Equal(t, testLogin, repo.stored.login)
 			assert.Equal(t, "created-hash", repo.stored.passwordHash)
 			assert.Equal(t, tt.password, hasher.hashedPassword)
 		})
@@ -156,15 +162,19 @@ func TestAuthService_Check(t *testing.T) {
 			if !tt.missing {
 				repo.credential = &PasswordCredential{
 					userID:       userID,
+					login:        testLogin,
 					passwordHash: "stored-hash",
 				}
 			}
 			hasher := &fakePasswordHasher{verifyResult: tt.verifyMatch}
 			service := NewAuthService(repo, hasher)
 
-			match, err := service.Check(userID, "entered-password")
+			actualUserID, match, err := service.Check(testLogin, "entered-password")
 			require.ErrorIs(t, err, tt.wantErr)
 			assert.Equal(t, tt.wantMatch, match)
+			if !tt.missing {
+				assert.Equal(t, userID, actualUserID)
+			}
 			if !tt.missing {
 				assert.Equal(t, "entered-password", hasher.verifiedPassword)
 				assert.Equal(t, "stored-hash", hasher.verifiedHash)
@@ -209,6 +219,7 @@ func TestAuthService_ChangePassword(t *testing.T) {
 			if !tt.missing {
 				repo.credential = &PasswordCredential{
 					userID:       userID,
+					login:        testLogin,
 					passwordHash: testOldHash,
 				}
 			}

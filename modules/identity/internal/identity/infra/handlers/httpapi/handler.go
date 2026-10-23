@@ -123,7 +123,7 @@ func identityResponse(user *domain.User) (publicapi.Identity, error) {
 
 	return publicapi.Identity{
 		UserId:     userID,
-		Login:      data.Login,
+		Login:      data.LoginSnapshot,
 		FirstName:  data.FirstName,
 		LastName:   data.LastName,
 		MiddleName: data.MiddleName,
