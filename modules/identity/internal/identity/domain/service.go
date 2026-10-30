@@ -22,25 +22,22 @@ func NewIdentityService(repo IdentityRepository) *IdentityService {
 	}
 }
 
-func (s *IdentityService) Create(
+func (s *IdentityService) CreateWithID(
+	id uuid.UUID,
 	firstName string,
 	lastName string,
 	middleName *string,
 	loginSnapshot string,
 	email string,
-) (uuid.UUID, error) {
+) error {
 	loginSnapshot = strings.TrimSpace(loginSnapshot)
 	if loginSnapshot == "" {
-		return uuid.Nil(), fmt.Errorf("create user: %w", ErrInvalidLogin)
-	}
-	id, err := s.repo.NextID()
-	if err != nil {
-		return uuid.Nil(), err
+		return fmt.Errorf("create user: %w", ErrInvalidLogin)
 	}
 
 	verifiedEmail, err := NewEmail(email)
 	if err != nil {
-		return uuid.Nil(), fmt.Errorf("create user: %w", err)
+		return fmt.Errorf("create user: %w", err)
 	}
 
 	user, err := NewUser(
@@ -52,14 +49,14 @@ func (s *IdentityService) Create(
 		verifiedEmail,
 	)
 	if err != nil {
-		return uuid.Nil(), fmt.Errorf("create user: new user: %w", err)
-	}
-	err = s.repo.Store(user)
-	if err != nil {
-		return uuid.Nil(), fmt.Errorf("create user: store: %w", err)
+		return fmt.Errorf("create user: new user: %w", err)
 	}
 
-	return id, nil
+	if err := s.repo.Store(user); err != nil {
+		return fmt.Errorf("create user: store: %w", err)
+	}
+
+	return nil
 }
 
 func (s *IdentityService) FindByLoginSnapshot(loginSnapshot string) (*User, error) {

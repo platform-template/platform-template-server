@@ -113,7 +113,6 @@ func (u *User) Data() *UserData {
 }
 
 type IdentityRepository interface {
-	NextID() (uuid.UUID, error)
 	Store(*User) error
 	FindByLoginSnapshot(string) (*User, error)
 	FindByID(uuid.UUID) (*User, error)

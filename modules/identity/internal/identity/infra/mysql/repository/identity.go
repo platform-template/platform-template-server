@@ -7,12 +7,15 @@ import (
 	"fmt"
 	"uuid"
 
-	"github.com/distributed-programming-2026/go-sdk/pkg/mysql"
-
 	"identity/internal/identity/domain"
 )
 
-func NewIdentityRepository(ctx context.Context, client mysql.ClientContext) domain.IdentityRepository {
+type Client interface {
+	ExecContext(ctx context.Context, queryID string, query string, args ...any) (sql.Result, error)
+	QueryRowContext(ctx context.Context, queryID string, query string, args ...any) *sql.Row
+}
+
+func NewIdentityRepository(ctx context.Context, client Client) domain.IdentityRepository {
 	return &identityRepository{
 		ctx:    ctx,
 		client: client,
@@ -21,11 +24,7 @@ func NewIdentityRepository(ctx context.Context, client mysql.ClientContext) doma
 
 type identityRepository struct {
 	ctx    context.Context
-	client mysql.ClientContext
-}
-
-func (r *identityRepository) NextID() (uuid.UUID, error) {
-	return uuid.New(), nil
+	client Client
 }
 
 func (r *identityRepository) Store(user *domain.User) error {

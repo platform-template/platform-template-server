@@ -1,0 +1,4914 @@
+===== FILE: .gitignore =====
+
+# Generated from protobuf and OpenAPI contracts
+*.pb.go
+*.gen.go
+
+# Build and test artifacts
+/dist/
+coverage.out
+
+
+===== FILE: .golangci.yml =====
+
+version: "2"
+run:
+  issues-exit-code: 1
+linters:
+  enable:
+    - asciicheck
+    - bodyclose
+    - dogsled
+    - dupl
+    - gochecknoinits
+    - gocognit
+    - goconst
+    - gocritic
+    - gocyclo
+    - gosec
+    - importas
+    - misspell
+    - nakedret
+    - nestif
+    - prealloc
+    - revive
+    - rowserrcheck
+    - sqlclosecheck
+    - staticcheck
+    - unconvert
+    - whitespace
+  settings:
+    gocritic:
+      disabled-checks:
+        - sloppyReassign
+        - whyNoLint
+      enabled-tags:
+        - experimental
+        - opinionated
+  exclusions:
+    generated: lax
+    presets:
+      - comments
+      - common-false-positives
+      - legacy
+      - std-error-handling
+    paths:
+      - third_party$
+      - builtin$
+      - examples$
+formatters:
+  enable:
+    - gofmt
+    - goimports
+  exclusions:
+    generated: lax
+    paths:
+      - third_party$
+      - builtin$
+      - examples$
+
+
+===== FILE: Dockerfile =====
+
+# Build locally first: mise run //modules/identity:build
+FROM gcr.io/distroless/base-debian12:nonroot
+COPY dist/identity /identity
+EXPOSE 8081 8082
+ENTRYPOINT ["/identity"]
+CMD ["service"]
+
+
+===== FILE: README.md =====
+
+# Identity service
+
+Рабочий пример использования go-sdk и исходник для генератора новых модулей.
+
+## Сценарий
+
+```text
+HTTP / gRPC → app → unit of work → echo + outbox (одна MySQL-транзакция)
+                                             ↓
+                                      relay → RabbitMQ
+                                             ↓
+                              message-handler → inbox → лог
+```
+
+HTTP: `POST /api/public/v1/echo` с JSON `{"body":"hello"}`. Ответ:
+`{"operationID":"<uuid>"}`. Пустая строка допустима; поле `body` обязательно.
+
+gRPC: `identityInternalAPI.IdentityService/Echo`, запрос `{"Body":"hello"}`,
+ответ с `OperationID`. Сервер поддерживает reflection:
+
+```sh
+grpcurl -plaintext -d '{"Body":"hello"}' localhost:8081 \
+  identityInternalAPI.IdentityService/Echo
+```
+
+Событие `identityEvents.Echo` содержит ID echo и исходную строку. SDK добавляет
+envelope с event ID, producer, type, временем и correlation ID. Общий exchange
+`domain-event` находится в `lib/event`; routing key модуля — `identity.Echo`.
+
+## Структура
+
+- `cmd`: конфигурация, команды запуска и файлы сборки зависимостей по подсистемам: MySQL, миграции, AMQP, события и серверы.
+- `internal/identity/app`: транзакционная граница через SDK `UnitOfWorkWithRepositoryProvider`.
+- `internal/identity/domain`: echo-модель, бизнес-операция, интерфейс репозитория и payload события; используется нативный пакет `uuid` Go 1.27.
+- `internal/identity/infra/mysql`: repository provider; `repository` содержит реализацию echo-репозитория, `migrations` — миграции модуля.
+- `internal/identity/infra/handlers`: HTTP, gRPC и события.
+- `internal/integration-tests`: инфраструктура, контейнеры и интеграционные проверки.
+- `api`: protobuf/OpenAPI-контракты; generated Go-код исключён из Git.
+
+Repository provider хранит транзакционный клиент и выдаёт репозиторий с контекстом
+операции. `app` использует `ExecuteWithRepositoryProvider`; SQL-клиент в него не
+передаётся. Outbox и репозиторий используют один context и один экземпляр UOW.
+
+## Запуск
+
+Из корня репозитория:
+
+```sh
+mise run local-up
+```
+
+Корневой mise автоматически подключает модульный `compose.yaml`, собирает бинарник
+и поднимает сервис и consumer в контейнерах.
+
+Бинарник поддерживает `service` (по умолчанию) и `message-handler`.
+`service` запускает HTTP, gRPC и relay. `message-handler` запускает consumer
+и HTTP `/healthz`. Health endpoint отвечает 204 и проверяет liveness.
+
+## Конфигурация
+
+| Переменная | Значение по умолчанию |
+| --- | --- |
+| `IDENTITY_APP_DEBUG` | `false` |
+| `IDENTITY_APP_GRACE_TIMEOUT` | `30s` |
+| `IDENTITY_HTTP_ADDRESS` | `:8082` |
+| `IDENTITY_GRPC_ADDRESS` | `:8081` |
+| `IDENTITY_MYSQL_ADDRESS` | `localhost:3306` |
+| `IDENTITY_MYSQL_DATABASE` | `identity` |
+| `IDENTITY_MYSQL_USER` | `identity` |
+| `IDENTITY_MYSQL_PASSWORD` | `identity` |
+| `IDENTITY_MYSQL_MAX_CONNECTIONS` | `10` |
+| `IDENTITY_MYSQL_CONNECTION_MAX_LIFETIME` | `30m` |
+| `IDENTITY_MYSQL_CONNECTION_MAX_IDLE_TIME` | `5m` |
+| `IDENTITY_MYSQL_CONNECT_TIMEOUT` | `5s` |
+| `IDENTITY_MYSQL_READ_TIMEOUT` | `10s` |
+| `IDENTITY_MYSQL_WRITE_TIMEOUT` | `10s` |
+| `IDENTITY_AMQP_URL` | `amqp://local:local@localhost:5672/` |
+| `IDENTITY_AMQP_QUEUE` | `identity.echo` |
+| `IDENTITY_AMQP_CONNECT_TIMEOUT` | `5s` |
+| `IDENTITY_AMQP_PREFETCH_COUNT` | `10` |
+| `IDENTITY_RELAY_INTERVAL` | `1s` |
+| `IDENTITY_RELAY_BATCH_SIZE` | `100` |
+| `IDENTITY_RELAY_PUBLISH_TIMEOUT` | `10s` |
+| `IDENTITY_RELAY_LOCK_TIMEOUT` | `1s` |
+
+DSN формируется рядом с connector через `mysqldriver.Config.FormatDSN()`;
+`parseTime` и `utf8mb4` включаются там же. `--debug` также включает подробные логи.
+Новые модули используют свой env-префикс.
+
+## Миграции и сборка
+
+```sh
+mise run //modules/identity:generate-migration "Create a new table"
+mise run //modules/identity:build
+```
+
+Генератор создаёт и регистрирует новую миграцию. Реализуйте `Up`: начальная
+заглушка возвращает ошибку. Обе команды сервиса применяют все таргеты миграций:
+модуль, outbox и inbox.
+
+`build` генерирует контракты и локально собирает Linux-бинарник `dist/identity`.
+Dockerfile только копирует его в образ. Для нативного запуска используйте задачу
+`run`, для выбора архитектуры Linux-сборки — `GOARCH`.
+
+## Гарантии
+
+Успех API означает commit echo и outbox. Ошибка внутри транзакции откатывает обе
+записи. Повторный API-запрос создаёт новый echo.
+
+Оба процесса объявляют durable-очередь. Relay использует publisher confirms и
+повторяет неудавшиеся публикации. API сохраняет операции при потере RabbitMQ
+после запуска; backlog отправляется после восстановления соединения. Ошибка
+подключения при первоначальном запуске останавливает процесс.
+
+Доставка at-least-once. Inbox подавляет повторную обработку зафиксированных
+`(consumer, event_id)`. Логирование не атомарно с commit inbox: при сбое возможен
+повторный лог. Ошибки consumer и невалидные события попадают в `<queue>.dead`
+через общий exchange `domain-event.dead`. Автоматический retry consumer не включён.
+
+HTTP и gRPC принудительно закрываются после grace timeout и возвращают ошибку,
+для которой `errors.Is(err, context.DeadlineExceeded)` истинно.
+Очистка outbox/inbox через SDK `Cleanup` в пример не входит.
+
+## Проверки
+
+```sh
+mise run //modules/identity:all
+mise run //modules/identity:integration-tests
+```
+
+Интеграционные тесты проверяют HTTP и gRPC API, запись события в outbox,
+обработку через inbox, повторную доставку и некорректные HTTP-запросы.
+Задача mise собирает Linux-бинарник и Docker-образ. Testcontainers запускает
+сервис и consumer из этого образа вместе с MySQL и RabbitMQ в отдельной сети.
+Тестовый MySQL-пароль содержит специальные символы для проверки DSN.
+
+
+===== FILE: api/events/events.pb.go =====
+
+// Code generated by protoc-gen-go. DO NOT EDIT.
+// versions:
+// 	protoc-gen-go v1.36.12
+// 	protoc        v7.36.2
+// source: events.proto
+
+package identityevents
+
+import (
+	protoreflect "google.golang.org/protobuf/reflect/protoreflect"
+	protoimpl "google.golang.org/protobuf/runtime/protoimpl"
+	reflect "reflect"
+	sync "sync"
+	unsafe "unsafe"
+)
+
+const (
+	// Verify that this generated code is sufficiently up-to-date.
+	_ = protoimpl.EnforceVersion(20 - protoimpl.MinVersion)
+	// Verify that runtime/protoimpl is sufficiently up-to-date.
+	_ = protoimpl.EnforceVersion(protoimpl.MaxVersion - 20)
+)
+
+type Echo struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	ID            string                 `protobuf:"bytes,1,opt,name=ID,proto3" json:"ID,omitempty"`
+	Body          string                 `protobuf:"bytes,2,opt,name=Body,proto3" json:"Body,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *Echo) Reset() {
+	*x = Echo{}
+	mi := &file_events_proto_msgTypes[0]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *Echo) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*Echo) ProtoMessage() {}
+
+func (x *Echo) ProtoReflect() protoreflect.Message {
+	mi := &file_events_proto_msgTypes[0]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use Echo.ProtoReflect.Descriptor instead.
+func (*Echo) Descriptor() ([]byte, []int) {
+	return file_events_proto_rawDescGZIP(), []int{0}
+}
+
+func (x *Echo) GetID() string {
+	if x != nil {
+		return x.ID
+	}
+	return ""
+}
+
+func (x *Echo) GetBody() string {
+	if x != nil {
+		return x.Body
+	}
+	return ""
+}
+
+var File_events_proto protoreflect.FileDescriptor
+
+const file_events_proto_rawDesc = "" +
+	"\n" +
+	"\fevents.proto\x12\x0eidentityEvents\"*\n" +
+	"\x04Echo\x12\x0e\n" +
+	"\x02ID\x18\x01 \x01(\tR\x02ID\x12\x12\n" +
+	"\x04Body\x18\x02 \x01(\tR\x04BodyB\x13Z\x11/.;identityeventsb\x06proto3"
+
+var (
+	file_events_proto_rawDescOnce sync.Once
+	file_events_proto_rawDescData []byte
+)
+
+func file_events_proto_rawDescGZIP() []byte {
+	file_events_proto_rawDescOnce.Do(func() {
+		file_events_proto_rawDescData = protoimpl.X.CompressGZIP(unsafe.Slice(unsafe.StringData(file_events_proto_rawDesc), len(file_events_proto_rawDesc)))
+	})
+	return file_events_proto_rawDescData
+}
+
+var file_events_proto_msgTypes = make([]protoimpl.MessageInfo, 1)
+var file_events_proto_goTypes = []any{
+	(*Echo)(nil), // 0: identityEvents.Echo
+}
+var file_events_proto_depIdxs = []int32{
+	0, // [0:0] is the sub-list for method output_type
+	0, // [0:0] is the sub-list for method input_type
+	0, // [0:0] is the sub-list for extension type_name
+	0, // [0:0] is the sub-list for extension extendee
+	0, // [0:0] is the sub-list for field type_name
+}
+
+func init() { file_events_proto_init() }
+func file_events_proto_init() {
+	if File_events_proto != nil {
+		return
+	}
+	type x struct{}
+	out := protoimpl.TypeBuilder{
+		File: protoimpl.DescBuilder{
+			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
+			RawDescriptor: unsafe.Slice(unsafe.StringData(file_events_proto_rawDesc), len(file_events_proto_rawDesc)),
+			NumEnums:      0,
+			NumMessages:   1,
+			NumExtensions: 0,
+			NumServices:   0,
+		},
+		GoTypes:           file_events_proto_goTypes,
+		DependencyIndexes: file_events_proto_depIdxs,
+		MessageInfos:      file_events_proto_msgTypes,
+	}.Build()
+	File_events_proto = out.File
+	file_events_proto_goTypes = nil
+	file_events_proto_depIdxs = nil
+}
+
+
+===== FILE: api/events/events.proto =====
+
+syntax = "proto3";
+package identityEvents;
+
+option go_package = "/.;identityevents";
+
+message Echo {
+  string ID = 1;
+  string Body = 2;
+}
+
+===== FILE: api/server/internalapi/identity_internalapi.pb.go =====
+
+// Code generated by protoc-gen-go. DO NOT EDIT.
+// versions:
+// 	protoc-gen-go v1.36.12
+// 	protoc        v7.36.2
+// source: identity_internalapi.proto
+
+package identityinternalapi
+
+import (
+	protoreflect "google.golang.org/protobuf/reflect/protoreflect"
+	protoimpl "google.golang.org/protobuf/runtime/protoimpl"
+	reflect "reflect"
+	sync "sync"
+	unsafe "unsafe"
+)
+
+const (
+	// Verify that this generated code is sufficiently up-to-date.
+	_ = protoimpl.EnforceVersion(20 - protoimpl.MinVersion)
+	// Verify that runtime/protoimpl is sufficiently up-to-date.
+	_ = protoimpl.EnforceVersion(protoimpl.MaxVersion - 20)
+)
+
+type CreateUserRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	FirstName     string                 `protobuf:"bytes,1,opt,name=first_name,json=firstName,proto3" json:"first_name,omitempty"`
+	LastName      string                 `protobuf:"bytes,2,opt,name=last_name,json=lastName,proto3" json:"last_name,omitempty"`
+	MiddleName    *string                `protobuf:"bytes,3,opt,name=middle_name,json=middleName,proto3,oneof" json:"middle_name,omitempty"`
+	Login         string                 `protobuf:"bytes,4,opt,name=login,proto3" json:"login,omitempty"`
+	Email         string                 `protobuf:"bytes,5,opt,name=email,proto3" json:"email,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *CreateUserRequest) Reset() {
+	*x = CreateUserRequest{}
+	mi := &file_identity_internalapi_proto_msgTypes[0]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *CreateUserRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*CreateUserRequest) ProtoMessage() {}
+
+func (x *CreateUserRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_identity_internalapi_proto_msgTypes[0]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use CreateUserRequest.ProtoReflect.Descriptor instead.
+func (*CreateUserRequest) Descriptor() ([]byte, []int) {
+	return file_identity_internalapi_proto_rawDescGZIP(), []int{0}
+}
+
+func (x *CreateUserRequest) GetFirstName() string {
+	if x != nil {
+		return x.FirstName
+	}
+	return ""
+}
+
+func (x *CreateUserRequest) GetLastName() string {
+	if x != nil {
+		return x.LastName
+	}
+	return ""
+}
+
+func (x *CreateUserRequest) GetMiddleName() string {
+	if x != nil && x.MiddleName != nil {
+		return *x.MiddleName
+	}
+	return ""
+}
+
+func (x *CreateUserRequest) GetLogin() string {
+	if x != nil {
+		return x.Login
+	}
+	return ""
+}
+
+func (x *CreateUserRequest) GetEmail() string {
+	if x != nil {
+		return x.Email
+	}
+	return ""
+}
+
+type CreateUserResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	UserId        string                 `protobuf:"bytes,1,opt,name=user_id,json=userId,proto3" json:"user_id,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *CreateUserResponse) Reset() {
+	*x = CreateUserResponse{}
+	mi := &file_identity_internalapi_proto_msgTypes[1]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *CreateUserResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*CreateUserResponse) ProtoMessage() {}
+
+func (x *CreateUserResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_identity_internalapi_proto_msgTypes[1]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use CreateUserResponse.ProtoReflect.Descriptor instead.
+func (*CreateUserResponse) Descriptor() ([]byte, []int) {
+	return file_identity_internalapi_proto_rawDescGZIP(), []int{1}
+}
+
+func (x *CreateUserResponse) GetUserId() string {
+	if x != nil {
+		return x.UserId
+	}
+	return ""
+}
+
+type FindUserByLoginRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Login         string                 `protobuf:"bytes,1,opt,name=login,proto3" json:"login,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *FindUserByLoginRequest) Reset() {
+	*x = FindUserByLoginRequest{}
+	mi := &file_identity_internalapi_proto_msgTypes[2]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *FindUserByLoginRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*FindUserByLoginRequest) ProtoMessage() {}
+
+func (x *FindUserByLoginRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_identity_internalapi_proto_msgTypes[2]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use FindUserByLoginRequest.ProtoReflect.Descriptor instead.
+func (*FindUserByLoginRequest) Descriptor() ([]byte, []int) {
+	return file_identity_internalapi_proto_rawDescGZIP(), []int{2}
+}
+
+func (x *FindUserByLoginRequest) GetLogin() string {
+	if x != nil {
+		return x.Login
+	}
+	return ""
+}
+
+type FindUserByLoginResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	UserId        string                 `protobuf:"bytes,1,opt,name=user_id,json=userId,proto3" json:"user_id,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *FindUserByLoginResponse) Reset() {
+	*x = FindUserByLoginResponse{}
+	mi := &file_identity_internalapi_proto_msgTypes[3]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *FindUserByLoginResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*FindUserByLoginResponse) ProtoMessage() {}
+
+func (x *FindUserByLoginResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_identity_internalapi_proto_msgTypes[3]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use FindUserByLoginResponse.ProtoReflect.Descriptor instead.
+func (*FindUserByLoginResponse) Descriptor() ([]byte, []int) {
+	return file_identity_internalapi_proto_rawDescGZIP(), []int{3}
+}
+
+func (x *FindUserByLoginResponse) GetUserId() string {
+	if x != nil {
+		return x.UserId
+	}
+	return ""
+}
+
+var File_identity_internalapi_proto protoreflect.FileDescriptor
+
+const file_identity_internalapi_proto_rawDesc = "" +
+	"\n" +
+	"\x1aidentity_internalapi.proto\x12\x13identityInternalAPI\"\xb1\x01\n" +
+	"\x11CreateUserRequest\x12\x1d\n" +
+	"\n" +
+	"first_name\x18\x01 \x01(\tR\tfirstName\x12\x1b\n" +
+	"\tlast_name\x18\x02 \x01(\tR\blastName\x12$\n" +
+	"\vmiddle_name\x18\x03 \x01(\tH\x00R\n" +
+	"middleName\x88\x01\x01\x12\x14\n" +
+	"\x05login\x18\x04 \x01(\tR\x05login\x12\x14\n" +
+	"\x05email\x18\x05 \x01(\tR\x05emailB\x0e\n" +
+	"\f_middle_name\"-\n" +
+	"\x12CreateUserResponse\x12\x17\n" +
+	"\auser_id\x18\x01 \x01(\tR\x06userId\".\n" +
+	"\x16FindUserByLoginRequest\x12\x14\n" +
+	"\x05login\x18\x01 \x01(\tR\x05login\"2\n" +
+	"\x17FindUserByLoginResponse\x12\x17\n" +
+	"\auser_id\x18\x01 \x01(\tR\x06userId2\xde\x01\n" +
+	"\x0fIdentityService\x12]\n" +
+	"\n" +
+	"CreateUser\x12&.identityInternalAPI.CreateUserRequest\x1a'.identityInternalAPI.CreateUserResponse\x12l\n" +
+	"\x0fFindUserByLogin\x12+.identityInternalAPI.FindUserByLoginRequest\x1a,.identityInternalAPI.FindUserByLoginResponseB\x18Z\x16/.;identityinternalapib\x06proto3"
+
+var (
+	file_identity_internalapi_proto_rawDescOnce sync.Once
+	file_identity_internalapi_proto_rawDescData []byte
+)
+
+func file_identity_internalapi_proto_rawDescGZIP() []byte {
+	file_identity_internalapi_proto_rawDescOnce.Do(func() {
+		file_identity_internalapi_proto_rawDescData = protoimpl.X.CompressGZIP(unsafe.Slice(unsafe.StringData(file_identity_internalapi_proto_rawDesc), len(file_identity_internalapi_proto_rawDesc)))
+	})
+	return file_identity_internalapi_proto_rawDescData
+}
+
+var file_identity_internalapi_proto_msgTypes = make([]protoimpl.MessageInfo, 4)
+var file_identity_internalapi_proto_goTypes = []any{
+	(*CreateUserRequest)(nil),       // 0: identityInternalAPI.CreateUserRequest
+	(*CreateUserResponse)(nil),      // 1: identityInternalAPI.CreateUserResponse
+	(*FindUserByLoginRequest)(nil),  // 2: identityInternalAPI.FindUserByLoginRequest
+	(*FindUserByLoginResponse)(nil), // 3: identityInternalAPI.FindUserByLoginResponse
+}
+var file_identity_internalapi_proto_depIdxs = []int32{
+	0, // 0: identityInternalAPI.IdentityService.CreateUser:input_type -> identityInternalAPI.CreateUserRequest
+	2, // 1: identityInternalAPI.IdentityService.FindUserByLogin:input_type -> identityInternalAPI.FindUserByLoginRequest
+	1, // 2: identityInternalAPI.IdentityService.CreateUser:output_type -> identityInternalAPI.CreateUserResponse
+	3, // 3: identityInternalAPI.IdentityService.FindUserByLogin:output_type -> identityInternalAPI.FindUserByLoginResponse
+	2, // [2:4] is the sub-list for method output_type
+	0, // [0:2] is the sub-list for method input_type
+	0, // [0:0] is the sub-list for extension type_name
+	0, // [0:0] is the sub-list for extension extendee
+	0, // [0:0] is the sub-list for field type_name
+}
+
+func init() { file_identity_internalapi_proto_init() }
+func file_identity_internalapi_proto_init() {
+	if File_identity_internalapi_proto != nil {
+		return
+	}
+	file_identity_internalapi_proto_msgTypes[0].OneofWrappers = []any{}
+	type x struct{}
+	out := protoimpl.TypeBuilder{
+		File: protoimpl.DescBuilder{
+			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
+			RawDescriptor: unsafe.Slice(unsafe.StringData(file_identity_internalapi_proto_rawDesc), len(file_identity_internalapi_proto_rawDesc)),
+			NumEnums:      0,
+			NumMessages:   4,
+			NumExtensions: 0,
+			NumServices:   1,
+		},
+		GoTypes:           file_identity_internalapi_proto_goTypes,
+		DependencyIndexes: file_identity_internalapi_proto_depIdxs,
+		MessageInfos:      file_identity_internalapi_proto_msgTypes,
+	}.Build()
+	File_identity_internalapi_proto = out.File
+	file_identity_internalapi_proto_goTypes = nil
+	file_identity_internalapi_proto_depIdxs = nil
+}
+
+
+===== FILE: api/server/internalapi/identity_internalapi.proto =====
+
+syntax = "proto3";
+package identityInternalAPI;
+
+option go_package = "/.;identityinternalapi";
+
+service IdentityService {
+  rpc CreateUser(CreateUserRequest) returns (CreateUserResponse);
+  rpc FindUserByLogin(FindUserByLoginRequest) returns (FindUserByLoginResponse);
+}
+
+message CreateUserRequest {
+  string first_name = 1;
+  string last_name = 2;
+  optional string middle_name = 3;
+  string login = 4;
+  string email = 5;
+}
+
+message CreateUserResponse {
+  string user_id = 1;
+}
+
+message FindUserByLoginRequest {
+  string login = 1;
+}
+
+message FindUserByLoginResponse {
+  string user_id = 1;
+}
+
+
+===== FILE: api/server/internalapi/identity_internalapi_grpc.pb.go =====
+
+// Code generated by protoc-gen-go-grpc. DO NOT EDIT.
+// versions:
+// - protoc-gen-go-grpc v1.6.2
+// - protoc             v7.36.2
+// source: identity_internalapi.proto
+
+package identityinternalapi
+
+import (
+	context "context"
+	grpc "google.golang.org/grpc"
+	codes "google.golang.org/grpc/codes"
+	status "google.golang.org/grpc/status"
+)
+
+// This is a compile-time assertion to ensure that this generated file
+// is compatible with the grpc package it is being compiled against.
+// Requires gRPC-Go v1.64.0 or later.
+const _ = grpc.SupportPackageIsVersion9
+
+const (
+	IdentityService_CreateUser_FullMethodName      = "/identityInternalAPI.IdentityService/CreateUser"
+	IdentityService_FindUserByLogin_FullMethodName = "/identityInternalAPI.IdentityService/FindUserByLogin"
+)
+
+// IdentityServiceClient is the client API for IdentityService service.
+//
+// For semantics around ctx use and closing/ending streaming RPCs, please refer to https://pkg.go.dev/google.golang.org/grpc/?tab=doc#ClientConn.NewStream.
+type IdentityServiceClient interface {
+	CreateUser(ctx context.Context, in *CreateUserRequest, opts ...grpc.CallOption) (*CreateUserResponse, error)
+	FindUserByLogin(ctx context.Context, in *FindUserByLoginRequest, opts ...grpc.CallOption) (*FindUserByLoginResponse, error)
+}
+
+type identityServiceClient struct {
+	cc grpc.ClientConnInterface
+}
+
+func NewIdentityServiceClient(cc grpc.ClientConnInterface) IdentityServiceClient {
+	return &identityServiceClient{cc}
+}
+
+func (c *identityServiceClient) CreateUser(ctx context.Context, in *CreateUserRequest, opts ...grpc.CallOption) (*CreateUserResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(CreateUserResponse)
+	err := c.cc.Invoke(ctx, IdentityService_CreateUser_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *identityServiceClient) FindUserByLogin(ctx context.Context, in *FindUserByLoginRequest, opts ...grpc.CallOption) (*FindUserByLoginResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(FindUserByLoginResponse)
+	err := c.cc.Invoke(ctx, IdentityService_FindUserByLogin_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+// IdentityServiceServer is the server API for IdentityService service.
+// All implementations must embed UnimplementedIdentityServiceServer
+// for forward compatibility.
+type IdentityServiceServer interface {
+	CreateUser(context.Context, *CreateUserRequest) (*CreateUserResponse, error)
+	FindUserByLogin(context.Context, *FindUserByLoginRequest) (*FindUserByLoginResponse, error)
+	mustEmbedUnimplementedIdentityServiceServer()
+}
+
+// UnimplementedIdentityServiceServer must be embedded to have
+// forward compatible implementations.
+//
+// NOTE: this should be embedded by value instead of pointer to avoid a nil
+// pointer dereference when methods are called.
+type UnimplementedIdentityServiceServer struct{}
+
+func (UnimplementedIdentityServiceServer) CreateUser(context.Context, *CreateUserRequest) (*CreateUserResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method CreateUser not implemented")
+}
+func (UnimplementedIdentityServiceServer) FindUserByLogin(context.Context, *FindUserByLoginRequest) (*FindUserByLoginResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method FindUserByLogin not implemented")
+}
+func (UnimplementedIdentityServiceServer) mustEmbedUnimplementedIdentityServiceServer() {}
+func (UnimplementedIdentityServiceServer) testEmbeddedByValue()                         {}
+
+// UnsafeIdentityServiceServer may be embedded to opt out of forward compatibility for this service.
+// Use of this interface is not recommended, as added methods to IdentityServiceServer will
+// result in compilation errors.
+type UnsafeIdentityServiceServer interface {
+	mustEmbedUnimplementedIdentityServiceServer()
+}
+
+func RegisterIdentityServiceServer(s grpc.ServiceRegistrar, srv IdentityServiceServer) {
+	// If the following call panics, it indicates UnimplementedIdentityServiceServer was
+	// embedded by pointer and is nil.  This will cause panics if an
+	// unimplemented method is ever invoked, so we test this at initialization
+	// time to prevent it from happening at runtime later due to I/O.
+	if t, ok := srv.(interface{ testEmbeddedByValue() }); ok {
+		t.testEmbeddedByValue()
+	}
+	s.RegisterService(&IdentityService_ServiceDesc, srv)
+}
+
+func _IdentityService_CreateUser_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(CreateUserRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(IdentityServiceServer).CreateUser(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: IdentityService_CreateUser_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(IdentityServiceServer).CreateUser(ctx, req.(*CreateUserRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _IdentityService_FindUserByLogin_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(FindUserByLoginRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(IdentityServiceServer).FindUserByLogin(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: IdentityService_FindUserByLogin_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(IdentityServiceServer).FindUserByLogin(ctx, req.(*FindUserByLoginRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+// IdentityService_ServiceDesc is the grpc.ServiceDesc for IdentityService service.
+// It's only intended for direct use with grpc.RegisterService,
+// and not to be introspected or modified (even as a copy)
+var IdentityService_ServiceDesc = grpc.ServiceDesc{
+	ServiceName: "identityInternalAPI.IdentityService",
+	HandlerType: (*IdentityServiceServer)(nil),
+	Methods: []grpc.MethodDesc{
+		{
+			MethodName: "CreateUser",
+			Handler:    _IdentityService_CreateUser_Handler,
+		},
+		{
+			MethodName: "FindUserByLogin",
+			Handler:    _IdentityService_FindUserByLogin_Handler,
+		},
+	},
+	Streams:  []grpc.StreamDesc{},
+	Metadata: "identity_internalapi.proto",
+}
+
+
+===== FILE: api/server/publicapi/publicapi.oapi.gen.go =====
+
+// Package publicapi provides primitives to interact with the openapi HTTP API.
+//
+// Code generated by github.com/oapi-codegen/oapi-codegen/v2 version v2.8.0 DO NOT EDIT.
+package publicapi
+
+import (
+	"bytes"
+	"compress/flate"
+	"context"
+	"encoding/base64"
+	"encoding/json"
+	"fmt"
+	"io"
+	"net/http"
+	"net/url"
+	"path"
+	"strings"
+
+	"github.com/getkin/kin-openapi/openapi3"
+	"github.com/go-chi/chi/v5"
+	openapi_types "github.com/oapi-codegen/runtime/types"
+)
+
+// Identity defines model for identity.
+type Identity struct {
+	Email      openapi_types.Email `json:"email"`
+	FirstName  string              `json:"firstName"`
+	LastName   string              `json:"lastName"`
+	Login      string              `json:"login"`
+	MiddleName *string             `json:"middleName,omitempty"`
+	UserId     openapi_types.UUID  `json:"userId"`
+}
+
+// UpdateCurrentIdentityRequest defines model for updateCurrentIdentityRequest.
+type UpdateCurrentIdentityRequest struct {
+	Email      openapi_types.Email `json:"email"`
+	FirstName  string              `json:"firstName"`
+	LastName   string              `json:"lastName"`
+	MiddleName *string             `json:"middleName,omitempty"`
+}
+
+// UpdateCurrentIdentityJSONRequestBody defines body for UpdateCurrentIdentity for application/json ContentType.
+type UpdateCurrentIdentityJSONRequestBody = UpdateCurrentIdentityRequest
+
+// RequestEditorFn is the function signature for the RequestEditor callback function
+type RequestEditorFn func(ctx context.Context, req *http.Request) error
+
+// Doer performs HTTP requests.
+//
+// The standard http.Client implements this interface.
+type HttpRequestDoer interface {
+	Do(req *http.Request) (*http.Response, error)
+}
+
+// Client which conforms to the OpenAPI3 specification for this service.
+type Client struct {
+	// The endpoint of the server conforming to this interface, with scheme,
+	// https://api.deepmap.com for example. This can contain a path relative
+	// to the server, such as https://api.deepmap.com/dev-test, and all the
+	// paths in the swagger spec will be appended to the server.
+	Server string
+
+	// Doer for performing requests, typically a *http.Client with any
+	// customized settings, such as certificate chains.
+	Client HttpRequestDoer
+
+	// A list of callbacks for modifying requests which are generated before sending over
+	// the network.
+	RequestEditors []RequestEditorFn
+}
+
+// ClientOption allows setting custom parameters during construction
+type ClientOption func(*Client) error
+
+// Creates a new Client, with reasonable defaults
+func NewClient(server string, opts ...ClientOption) (*Client, error) {
+	// create a client with sane default values
+	client := Client{
+		Server: server,
+	}
+	// mutate client and add all optional params
+	for _, o := range opts {
+		if err := o(&client); err != nil {
+			return nil, err
+		}
+	}
+	// ensure the server URL always has a trailing slash
+	if !strings.HasSuffix(client.Server, "/") {
+		client.Server += "/"
+	}
+	// create httpClient, if not already present
+	if client.Client == nil {
+		client.Client = &http.Client{}
+	}
+	return &client, nil
+}
+
+// WithHTTPClient allows overriding the default Doer, which is
+// automatically created using http.Client. This is useful for tests.
+func WithHTTPClient(doer HttpRequestDoer) ClientOption {
+	return func(c *Client) error {
+		c.Client = doer
+		return nil
+	}
+}
+
+// WithRequestEditorFn allows setting up a callback function, which will be
+// called right before sending the request. This can be used to mutate the request.
+func WithRequestEditorFn(fn RequestEditorFn) ClientOption {
+	return func(c *Client) error {
+		c.RequestEditors = append(c.RequestEditors, fn)
+		return nil
+	}
+}
+
+// The interface specification for the client above.
+type ClientInterface interface {
+
+	// GetCurrentIdentity performs a GET /api/v1/identity/me (the `GetCurrentIdentity` operationId) request.
+	GetCurrentIdentity(ctx context.Context, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// UpdateCurrentIdentityWithBody performs a PATCH /api/v1/identity/me (the `UpdateCurrentIdentity` operationId) request,
+	// with any type of body and a specified content type.
+	UpdateCurrentIdentityWithBody(ctx context.Context, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// UpdateCurrentIdentity performs a PATCH /api/v1/identity/me (the `UpdateCurrentIdentity` operationId) request.
+	// Takes a body of the `application/json` content type.
+	UpdateCurrentIdentity(ctx context.Context, body UpdateCurrentIdentityJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error)
+}
+
+// GetCurrentIdentity performs a GET /api/v1/identity/me (the `GetCurrentIdentity` operationId) request.
+func (c *Client) GetCurrentIdentity(ctx context.Context, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewGetCurrentIdentityRequest(c.Server)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+// UpdateCurrentIdentityWithBody performs a PATCH /api/v1/identity/me (the `UpdateCurrentIdentity` operationId) request,
+// with any type of body and a specified content type.
+func (c *Client) UpdateCurrentIdentityWithBody(ctx context.Context, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewUpdateCurrentIdentityRequestWithBody(c.Server, contentType, body)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+// UpdateCurrentIdentity performs a PATCH /api/v1/identity/me (the `UpdateCurrentIdentity` operationId) request.
+// Takes a body of the `application/json` content type.
+func (c *Client) UpdateCurrentIdentity(ctx context.Context, body UpdateCurrentIdentityJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewUpdateCurrentIdentityRequest(c.Server, body)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+// NewGetCurrentIdentityRequest constructs an http.Request for the GetCurrentIdentity method
+func NewGetCurrentIdentityRequest(server string) (*http.Request, error) {
+	var err error
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/api/v1/identity/me")
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest(http.MethodGet, queryURL.String(), nil)
+	if err != nil {
+		return nil, err
+	}
+
+	return req, nil
+}
+
+// NewUpdateCurrentIdentityRequest calls the generic UpdateCurrentIdentity builder with application/json body
+func NewUpdateCurrentIdentityRequest(server string, body UpdateCurrentIdentityJSONRequestBody) (*http.Request, error) {
+	var bodyReader io.Reader
+	buf, err := json.Marshal(body)
+	if err != nil {
+		return nil, err
+	}
+	bodyReader = bytes.NewReader(buf)
+	return NewUpdateCurrentIdentityRequestWithBody(server, "application/json", bodyReader)
+}
+
+// NewUpdateCurrentIdentityRequestWithBody constructs an http.Request for the UpdateCurrentIdentity method, with any body, and a specified content type
+func NewUpdateCurrentIdentityRequestWithBody(server string, contentType string, body io.Reader) (*http.Request, error) {
+	var err error
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/api/v1/identity/me")
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest(http.MethodPatch, queryURL.String(), body)
+	if err != nil {
+		return nil, err
+	}
+
+	req.Header.Add("Content-Type", contentType)
+
+	return req, nil
+}
+
+func (c *Client) applyEditors(ctx context.Context, req *http.Request, additionalEditors []RequestEditorFn) error {
+	for _, r := range c.RequestEditors {
+		if err := r(ctx, req); err != nil {
+			return err
+		}
+	}
+	for _, r := range additionalEditors {
+		if err := r(ctx, req); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// ClientWithResponses builds on ClientInterface to offer response payloads
+type ClientWithResponses struct {
+	ClientInterface
+}
+
+// NewClientWithResponses creates a new ClientWithResponses, which wraps
+// Client with return type handling
+func NewClientWithResponses(server string, opts ...ClientOption) (*ClientWithResponses, error) {
+	client, err := NewClient(server, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return &ClientWithResponses{client}, nil
+}
+
+// WithBaseURL overrides the baseURL.
+func WithBaseURL(baseURL string) ClientOption {
+	return func(c *Client) error {
+		newBaseURL, err := url.Parse(baseURL)
+		if err != nil {
+			return err
+		}
+		c.Server = newBaseURL.String()
+		return nil
+	}
+}
+
+// ClientWithResponsesInterface is the interface specification for the client with responses above.
+type ClientWithResponsesInterface interface {
+
+	// GetCurrentIdentityWithResponse performs a GET /api/v1/identity/me (the `GetCurrentIdentity` operationId) request.
+	//
+	// Returns a wrapper object for the known response body format(s).
+	GetCurrentIdentityWithResponse(ctx context.Context, reqEditors ...RequestEditorFn) (*GetCurrentIdentityResponse, error)
+
+	// UpdateCurrentIdentityWithBodyWithResponse performs a PATCH /api/v1/identity/me (the `UpdateCurrentIdentity` operationId) request,
+	// with any type of body and a specified content type.
+	//
+	// Returns a wrapper object for the known response body format(s).
+	UpdateCurrentIdentityWithBodyWithResponse(ctx context.Context, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*UpdateCurrentIdentityResponse, error)
+
+	// UpdateCurrentIdentityWithResponse performs a PATCH /api/v1/identity/me (the `UpdateCurrentIdentity` operationId) request.
+	// Takes a body of the `application/json` content type, and returns a wrapper object for the known response body format(s).
+	UpdateCurrentIdentityWithResponse(ctx context.Context, body UpdateCurrentIdentityJSONRequestBody, reqEditors ...RequestEditorFn) (*UpdateCurrentIdentityResponse, error)
+}
+
+type GetCurrentIdentityResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	// JSON200 the response for an HTTP 200 `application/json` response
+	JSON200 *Identity
+}
+
+// GetJSON200 returns the response for an HTTP 200 `application/json` response
+func (r GetCurrentIdentityResponse) GetJSON200() *Identity {
+	return r.JSON200
+}
+
+// GetBody returns the raw response body bytes
+func (r GetCurrentIdentityResponse) GetBody() []byte {
+	return r.Body
+}
+
+// Status returns HTTPResponse.Status
+func (r GetCurrentIdentityResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r GetCurrentIdentityResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+// ContentType is a convenience method to retrieve the Content-Type value from the HTTP response headers
+func (r GetCurrentIdentityResponse) ContentType() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Header.Get("Content-Type")
+	}
+	return ""
+}
+
+type UpdateCurrentIdentityResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	// JSON200 the response for an HTTP 200 `application/json` response
+	JSON200 *Identity
+}
+
+// GetJSON200 returns the response for an HTTP 200 `application/json` response
+func (r UpdateCurrentIdentityResponse) GetJSON200() *Identity {
+	return r.JSON200
+}
+
+// GetBody returns the raw response body bytes
+func (r UpdateCurrentIdentityResponse) GetBody() []byte {
+	return r.Body
+}
+
+// Status returns HTTPResponse.Status
+func (r UpdateCurrentIdentityResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r UpdateCurrentIdentityResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+// ContentType is a convenience method to retrieve the Content-Type value from the HTTP response headers
+func (r UpdateCurrentIdentityResponse) ContentType() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Header.Get("Content-Type")
+	}
+	return ""
+}
+
+// GetCurrentIdentityWithResponse performs a GET /api/v1/identity/me (the `GetCurrentIdentity` operationId) request.
+//
+// Returns a wrapper object for the known response body format(s).
+func (c *ClientWithResponses) GetCurrentIdentityWithResponse(ctx context.Context, reqEditors ...RequestEditorFn) (*GetCurrentIdentityResponse, error) {
+	rsp, err := c.GetCurrentIdentity(ctx, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseGetCurrentIdentityResponse(rsp)
+}
+
+// UpdateCurrentIdentityWithBodyWithResponse performs a PATCH /api/v1/identity/me (the `UpdateCurrentIdentity` operationId) request,
+// with any type of body and a specified content type.
+//
+// Returns a wrapper object for the known response body format(s).
+func (c *ClientWithResponses) UpdateCurrentIdentityWithBodyWithResponse(ctx context.Context, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*UpdateCurrentIdentityResponse, error) {
+	rsp, err := c.UpdateCurrentIdentityWithBody(ctx, contentType, body, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseUpdateCurrentIdentityResponse(rsp)
+}
+
+// UpdateCurrentIdentityWithResponse performs a PATCH /api/v1/identity/me (the `UpdateCurrentIdentity` operationId) request.
+// Takes a body of the `application/json` content type, and returns a wrapper object for the known response body format(s).
+func (c *ClientWithResponses) UpdateCurrentIdentityWithResponse(ctx context.Context, body UpdateCurrentIdentityJSONRequestBody, reqEditors ...RequestEditorFn) (*UpdateCurrentIdentityResponse, error) {
+	rsp, err := c.UpdateCurrentIdentity(ctx, body, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseUpdateCurrentIdentityResponse(rsp)
+}
+
+// ParseGetCurrentIdentityResponse parses an HTTP response from a GetCurrentIdentityWithResponse call
+func ParseGetCurrentIdentityResponse(rsp *http.Response) (*GetCurrentIdentityResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &GetCurrentIdentityResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
+		var dest Identity
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON200 = &dest
+
+	case rsp.StatusCode == 401:
+		break // No content-type
+
+	case rsp.StatusCode == 404:
+		break // No content-type
+
+	case rsp.StatusCode == 500:
+		break // No content-type
+
+	}
+
+	return response, nil
+}
+
+// ParseUpdateCurrentIdentityResponse parses an HTTP response from a UpdateCurrentIdentityWithResponse call
+func ParseUpdateCurrentIdentityResponse(rsp *http.Response) (*UpdateCurrentIdentityResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &UpdateCurrentIdentityResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
+		var dest Identity
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON200 = &dest
+
+	case rsp.StatusCode == 400:
+		break // No content-type
+
+	case rsp.StatusCode == 401:
+		break // No content-type
+
+	case rsp.StatusCode == 404:
+		break // No content-type
+
+	case rsp.StatusCode == 500:
+		break // No content-type
+
+	}
+
+	return response, nil
+}
+
+// ServerInterface represents all server handlers.
+type ServerInterface interface {
+
+	// (GET /api/v1/identity/me)
+	GetCurrentIdentity(w http.ResponseWriter, r *http.Request)
+
+	// (PATCH /api/v1/identity/me)
+	UpdateCurrentIdentity(w http.ResponseWriter, r *http.Request)
+}
+
+// Unimplemented server implementation that returns http.StatusNotImplemented for each endpoint.
+
+type Unimplemented struct{}
+
+// (GET /api/v1/identity/me)
+func (_ Unimplemented) GetCurrentIdentity(w http.ResponseWriter, r *http.Request) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// (PATCH /api/v1/identity/me)
+func (_ Unimplemented) UpdateCurrentIdentity(w http.ResponseWriter, r *http.Request) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// ServerInterfaceWrapper converts contexts to parameters.
+type ServerInterfaceWrapper struct {
+	Handler            ServerInterface
+	HandlerMiddlewares []MiddlewareFunc
+	ErrorHandlerFunc   func(w http.ResponseWriter, r *http.Request, err error)
+}
+
+type MiddlewareFunc func(http.Handler) http.Handler
+
+// GetCurrentIdentity operation middleware
+func (siw *ServerInterfaceWrapper) GetCurrentIdentity(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.GetCurrentIdentity(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// UpdateCurrentIdentity operation middleware
+func (siw *ServerInterfaceWrapper) UpdateCurrentIdentity(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.UpdateCurrentIdentity(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+type UnescapedCookieParamError struct {
+	ParamName string
+	Err       error
+}
+
+func (e *UnescapedCookieParamError) Error() string {
+	return fmt.Sprintf("error unescaping cookie parameter '%s'", e.ParamName)
+}
+
+func (e *UnescapedCookieParamError) Unwrap() error {
+	return e.Err
+}
+
+type UnmarshalingParamError struct {
+	ParamName string
+	Err       error
+}
+
+func (e *UnmarshalingParamError) Error() string {
+	return fmt.Sprintf("Error unmarshaling parameter %s as JSON: %s", e.ParamName, e.Err.Error())
+}
+
+func (e *UnmarshalingParamError) Unwrap() error {
+	return e.Err
+}
+
+type RequiredParamError struct {
+	ParamName string
+}
+
+func (e *RequiredParamError) Error() string {
+	return fmt.Sprintf("Query argument %s is required, but not found", e.ParamName)
+}
+
+type RequiredHeaderError struct {
+	ParamName string
+	Err       error
+}
+
+func (e *RequiredHeaderError) Error() string {
+	return fmt.Sprintf("Header parameter %s is required, but not found", e.ParamName)
+}
+
+func (e *RequiredHeaderError) Unwrap() error {
+	return e.Err
+}
+
+type InvalidParamFormatError struct {
+	ParamName string
+	Err       error
+}
+
+func (e *InvalidParamFormatError) Error() string {
+	return fmt.Sprintf("Invalid format for parameter %s: %s", e.ParamName, e.Err.Error())
+}
+
+func (e *InvalidParamFormatError) Unwrap() error {
+	return e.Err
+}
+
+type TooManyValuesForParamError struct {
+	ParamName string
+	Count     int
+}
+
+func (e *TooManyValuesForParamError) Error() string {
+	return fmt.Sprintf("Expected one value for %s, got %d", e.ParamName, e.Count)
+}
+
+// Handler creates http.Handler with routing matching OpenAPI spec.
+func Handler(si ServerInterface) http.Handler {
+	return HandlerWithOptions(si, ChiServerOptions{})
+}
+
+type ChiServerOptions struct {
+	BaseURL          string
+	BaseRouter       chi.Router
+	Middlewares      []MiddlewareFunc
+	ErrorHandlerFunc func(w http.ResponseWriter, r *http.Request, err error)
+}
+
+// HandlerFromMux creates http.Handler with routing matching OpenAPI spec based on the provided mux.
+func HandlerFromMux(si ServerInterface, r chi.Router) http.Handler {
+	return HandlerWithOptions(si, ChiServerOptions{
+		BaseRouter: r,
+	})
+}
+
+func HandlerFromMuxWithBaseURL(si ServerInterface, r chi.Router, baseURL string) http.Handler {
+	return HandlerWithOptions(si, ChiServerOptions{
+		BaseURL:    baseURL,
+		BaseRouter: r,
+	})
+}
+
+// HandlerWithOptions creates http.Handler with additional options
+func HandlerWithOptions(si ServerInterface, options ChiServerOptions) http.Handler {
+	r := options.BaseRouter
+
+	if r == nil {
+		r = chi.NewRouter()
+	}
+	if options.ErrorHandlerFunc == nil {
+		options.ErrorHandlerFunc = func(w http.ResponseWriter, r *http.Request, err error) {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+		}
+	}
+	wrapper := ServerInterfaceWrapper{
+		Handler:            si,
+		HandlerMiddlewares: options.Middlewares,
+		ErrorHandlerFunc:   options.ErrorHandlerFunc,
+	}
+
+	r.Group(func(r chi.Router) {
+		r.Get(options.BaseURL+"/api/v1/identity/me", wrapper.GetCurrentIdentity)
+	})
+	r.Group(func(r chi.Router) {
+		r.Patch(options.BaseURL+"/api/v1/identity/me", wrapper.UpdateCurrentIdentity)
+	})
+
+	return r
+}
+
+type GetCurrentIdentityRequestObject struct {
+}
+
+type GetCurrentIdentityResponseObject interface {
+	VisitGetCurrentIdentityResponse(w http.ResponseWriter) error
+}
+
+type GetCurrentIdentity200JSONResponse Identity
+
+func (response GetCurrentIdentity200JSONResponse) VisitGetCurrentIdentityResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetCurrentIdentity401Response struct {
+}
+
+func (response GetCurrentIdentity401Response) VisitGetCurrentIdentityResponse(w http.ResponseWriter) error {
+	w.WriteHeader(401)
+	return nil
+}
+
+type GetCurrentIdentity404Response struct {
+}
+
+func (response GetCurrentIdentity404Response) VisitGetCurrentIdentityResponse(w http.ResponseWriter) error {
+	w.WriteHeader(404)
+	return nil
+}
+
+type GetCurrentIdentity500Response struct {
+}
+
+func (response GetCurrentIdentity500Response) VisitGetCurrentIdentityResponse(w http.ResponseWriter) error {
+	w.WriteHeader(500)
+	return nil
+}
+
+type UpdateCurrentIdentityRequestObject struct {
+	Body *UpdateCurrentIdentityJSONRequestBody
+}
+
+type UpdateCurrentIdentityResponseObject interface {
+	VisitUpdateCurrentIdentityResponse(w http.ResponseWriter) error
+}
+
+type UpdateCurrentIdentity200JSONResponse Identity
+
+func (response UpdateCurrentIdentity200JSONResponse) VisitUpdateCurrentIdentityResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type UpdateCurrentIdentity400Response struct {
+}
+
+func (response UpdateCurrentIdentity400Response) VisitUpdateCurrentIdentityResponse(w http.ResponseWriter) error {
+	w.WriteHeader(400)
+	return nil
+}
+
+type UpdateCurrentIdentity401Response struct {
+}
+
+func (response UpdateCurrentIdentity401Response) VisitUpdateCurrentIdentityResponse(w http.ResponseWriter) error {
+	w.WriteHeader(401)
+	return nil
+}
+
+type UpdateCurrentIdentity404Response struct {
+}
+
+func (response UpdateCurrentIdentity404Response) VisitUpdateCurrentIdentityResponse(w http.ResponseWriter) error {
+	w.WriteHeader(404)
+	return nil
+}
+
+type UpdateCurrentIdentity500Response struct {
+}
+
+func (response UpdateCurrentIdentity500Response) VisitUpdateCurrentIdentityResponse(w http.ResponseWriter) error {
+	w.WriteHeader(500)
+	return nil
+}
+
+// StrictServerInterface represents all server handlers.
+type StrictServerInterface interface {
+
+	// (GET /api/v1/identity/me)
+	GetCurrentIdentity(ctx context.Context, request GetCurrentIdentityRequestObject) (GetCurrentIdentityResponseObject, error)
+
+	// (PATCH /api/v1/identity/me)
+	UpdateCurrentIdentity(ctx context.Context, request UpdateCurrentIdentityRequestObject) (UpdateCurrentIdentityResponseObject, error)
+}
+
+type StrictHandlerFunc func(ctx context.Context, w http.ResponseWriter, r *http.Request, request any) (any, error)
+type StrictMiddlewareFunc func(f StrictHandlerFunc, operationID string) StrictHandlerFunc
+
+type StrictHTTPServerOptions struct {
+	RequestErrorHandlerFunc  func(w http.ResponseWriter, r *http.Request, err error)
+	ResponseErrorHandlerFunc func(w http.ResponseWriter, r *http.Request, err error)
+}
+
+func NewStrictHandler(ssi StrictServerInterface, middlewares []StrictMiddlewareFunc) ServerInterface {
+	return &strictHandler{ssi: ssi, middlewares: middlewares, options: StrictHTTPServerOptions{
+		RequestErrorHandlerFunc: func(w http.ResponseWriter, r *http.Request, err error) {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+		},
+		ResponseErrorHandlerFunc: func(w http.ResponseWriter, r *http.Request, err error) {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+		},
+	}}
+}
+
+func NewStrictHandlerWithOptions(ssi StrictServerInterface, middlewares []StrictMiddlewareFunc, options StrictHTTPServerOptions) ServerInterface {
+	if options.RequestErrorHandlerFunc == nil {
+		options.RequestErrorHandlerFunc = func(w http.ResponseWriter, r *http.Request, err error) {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+		}
+	}
+	if options.ResponseErrorHandlerFunc == nil {
+		options.ResponseErrorHandlerFunc = func(w http.ResponseWriter, r *http.Request, err error) {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+		}
+	}
+	return &strictHandler{ssi: ssi, middlewares: middlewares, options: options}
+}
+
+type strictHandler struct {
+	ssi         StrictServerInterface
+	middlewares []StrictMiddlewareFunc
+	options     StrictHTTPServerOptions
+}
+
+// GetCurrentIdentity operation middleware
+func (sh *strictHandler) GetCurrentIdentity(w http.ResponseWriter, r *http.Request) {
+	var request GetCurrentIdentityRequestObject
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.GetCurrentIdentity(ctx, request.(GetCurrentIdentityRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "GetCurrentIdentity")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(GetCurrentIdentityResponseObject); ok {
+		if err := validResponse.VisitGetCurrentIdentityResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// UpdateCurrentIdentity operation middleware
+func (sh *strictHandler) UpdateCurrentIdentity(w http.ResponseWriter, r *http.Request) {
+	var request UpdateCurrentIdentityRequestObject
+
+	var body UpdateCurrentIdentityJSONRequestBody
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		sh.options.RequestErrorHandlerFunc(w, r, fmt.Errorf("can't decode JSON body: %w", err))
+		return
+	}
+	request.Body = &body
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.UpdateCurrentIdentity(ctx, request.(UpdateCurrentIdentityRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "UpdateCurrentIdentity")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(UpdateCurrentIdentityResponseObject); ok {
+		if err := validResponse.VisitUpdateCurrentIdentityResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// Base64 encoded, compressed with deflate, json marshaled OpenAPI spec.
+// Stored as a slice of fixed-width chunks rather than one concatenated
+// const string: with thousands of chunks the chained `+` fold is several
+// times slower for the Go compiler than parsing a slice literal.
+var swaggerSpec = []string{
+	"zFNNb9NAEP0rq4GjWztQLr4BBxQJEELqCXHYesfJVPbsdnYcEVX+72i9+Wg+CEKqRE8ZZeaN37735hEa",
+	"3wfPyBqhfoTYLLG3U0kOWUnXqQ7iA4oSTh3sLXWpaL30VqHe/FOArgNCDVGFeAFjAS1J1K+2xzR+0u3s",
+	"paZfEJ/t9ORch38EDhFl7g74DQO5U3pjAYIPAwk6qH9scdsvPyX/hGqxeezP3Tp/d4+NTl8Ozip+HESQ",
+	"db7R7zs+DBj1+WTsiT8jL3QJ9ay4LOpfRi8KeaTOP4qR4MStnxaTdqm3VcRElBU1aN5/m0MBK5RInqGG",
+	"2XV1XUEBv65soKscwJZQoN6lMQx3HTU2UOLvA3Iqa3i7QQary0nc0gYqV7NyiyvzGxc4GZFssEqeU07g",
+	"E+qRZ5DeHoPnmK16U1Xpp/GsyNMGG0LikXaU99Hz/nhS9VqwhRpelfvrKnM37hhljRzGRihoFmBDw+xn",
+	"CripZmnl4eAXipF4YbwY4pXtyBk76DKhGqvoTApzRt+com8jimGvpvUDuzT2rqpOx+asKGy7yS8UgyJe",
+	"Mu1gtVmeKnl77gAgBwmjfvBu/Ww6Xjy28TC+KgOO/8nTrIk78vSs3NnIIL6lDo2zal9oAMZx/D0A",
+}
+
+// decodeSpec returns the embedded OpenAPI spec as raw JSON bytes,
+// after base64-decoding and flate-decompressing the embedded blob.
+func decodeSpec() ([]byte, error) {
+	encoded := strings.Join(swaggerSpec, "")
+	compressed, err := base64.StdEncoding.DecodeString(encoded)
+	if err != nil {
+		return nil, fmt.Errorf("error base64 decoding spec: %w", err)
+	}
+	zr := flate.NewReader(bytes.NewReader(compressed))
+	var buf bytes.Buffer
+	if _, err := buf.ReadFrom(zr); err != nil {
+		return nil, fmt.Errorf("read flate: %w", err)
+	}
+	if err := zr.Close(); err != nil {
+		return nil, fmt.Errorf("close flate reader: %w", err)
+	}
+
+	return buf.Bytes(), nil
+}
+
+var rawSpec = decodeSpecCached()
+
+// a naive cache of the decoded OpenAPI spec
+func decodeSpecCached() func() ([]byte, error) {
+	data, err := decodeSpec()
+	return func() ([]byte, error) {
+		return data, err
+	}
+}
+
+// Constructs a synthetic filesystem for resolving external references when loading openapi specifications.
+func PathToRawSpec(pathToFile string) map[string]func() ([]byte, error) {
+	res := make(map[string]func() ([]byte, error))
+	if len(pathToFile) > 0 {
+		res[pathToFile] = rawSpec
+	}
+
+	return res
+}
+
+// GetSpec returns the OpenAPI specification corresponding to the generated
+// code in this file. External references in the spec are resolved through
+// PathToRawSpec; externally-referenced files must be embedded in their
+// corresponding Go packages (via the import-mapping feature). URL-based
+// external refs are not supported.
+func GetSpec() (swagger *openapi3.T, err error) {
+	resolvePath := PathToRawSpec("")
+
+	loader := openapi3.NewLoader()
+	loader.IsExternalRefsAllowed = true
+	loader.ReadFromURIFunc = func(loader *openapi3.Loader, url *url.URL) ([]byte, error) {
+		pathToFile := url.String()
+		pathToFile = path.Clean(pathToFile)
+		getSpec, ok := resolvePath[pathToFile]
+		if !ok {
+			err1 := fmt.Errorf("path not found: %s", pathToFile)
+			return nil, err1
+		}
+		return getSpec()
+	}
+	var specData []byte
+	specData, err = rawSpec()
+	if err != nil {
+		return
+	}
+	swagger, err = loader.LoadFromData(specData)
+	if err != nil {
+		return
+	}
+	return
+}
+
+// GetSpecJSON returns the raw JSON bytes of the embedded OpenAPI
+// specification: decompressed but not unmarshaled. External references
+// are not resolved here; the bytes are the spec exactly as embedded by
+// codegen. The result is cached at package init time, so repeated calls
+// are cheap.
+func GetSpecJSON() ([]byte, error) {
+	return rawSpec()
+}
+
+// GetSwagger returns the OpenAPI specification corresponding to the
+// generated code in this file.
+//
+// Deprecated: GetSwagger predates kin-openapi renaming openapi3.Swagger
+// to openapi3.T. Use [GetSpec] instead. This wrapper is retained for
+// backwards compatibility.
+func GetSwagger() (*openapi3.T, error) {
+	return GetSpec()
+}
+
+
+===== FILE: api/server/publicapi/publicapi.oapi.yaml =====
+
+openapi: 3.0.0
+info:
+  version: 1.0.0
+  title: Identity service API
+  x-api-identifier: identitypublicapi
+paths:
+  /api/v1/identity/me:
+    get:
+      operationId: getCurrentIdentity
+      responses:
+        "200":
+          description: Current identity
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/identity"
+        "401": {description: Missing or invalid authenticated user}
+        "404": {description: User not found}
+        "500": {description: Internal server error}
+    patch:
+      operationId: updateCurrentIdentity
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/updateCurrentIdentityRequest"
+      responses:
+        "200":
+          description: Updated identity
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/identity"
+        "400": {description: Invalid profile data}
+        "401": {description: Missing or invalid authenticated user}
+        "404": {description: User not found}
+        "500": {description: Internal server error}
+components:
+  schemas:
+    identity:
+      type: object
+      required: [userId, login, firstName, lastName, email]
+      properties:
+        userId: {type: string, format: uuid}
+        login: {type: string}
+        firstName: {type: string}
+        lastName: {type: string}
+        middleName: {type: string}
+        email: {type: string, format: email}
+    updateCurrentIdentityRequest:
+      type: object
+      required: [firstName, lastName, email]
+      properties:
+        firstName: {type: string, minLength: 1}
+        lastName: {type: string, minLength: 1}
+        middleName: {type: string}
+        email: {type: string, format: email}
+
+
+===== FILE: cmd/dependencies_amqp.go =====
+
+package main
+
+import (
+	"log/slog"
+
+	"github.com/distributed-programming-2026/go-sdk/pkg/amqp"
+
+	"github.com/distributed-programming-2026/lib/event"
+
+	"identity/internal/identity/config"
+)
+
+func newConnection(logger *slog.Logger, conf config.Env) amqp.Connection {
+	return amqp.NewConnection(appID, amqp.ConnectionConfig{
+		URL:            conf.AMQP.URL,
+		ConnectTimeout: conf.AMQP.ConnectTimeout,
+	}, logger)
+}
+
+func eventQueue(conf config.Env) *amqp.QueueConfig {
+	return &amqp.QueueConfig{
+		Name:    conf.AMQP.Queue,
+		Durable: true,
+		DLQ: &amqp.DLQConfig{
+			Exchange:   *event.DomainDeadLetterExchange(),
+			Queue:      conf.AMQP.Queue + ".dead",
+			RoutingKey: conf.AMQP.Queue,
+			Durable:    true,
+		},
+	}
+}
+
+func eventBinding(conf config.Env) *amqp.BindConfig {
+	return &amqp.BindConfig{
+		QueueName:    conf.AMQP.Queue,
+		ExchangeName: event.DomainExchange().Name,
+		RoutingKeys: []string{
+			appID + ".Echo",
+		},
+	}
+}
+
+
+===== FILE: cmd/dependencies_events.go =====
+
+package main
+
+import (
+	"log/slog"
+
+	"github.com/distributed-programming-2026/go-sdk/pkg/amqp"
+	"github.com/distributed-programming-2026/go-sdk/pkg/event"
+	eventamqp "github.com/distributed-programming-2026/go-sdk/pkg/event/amqp"
+	"github.com/distributed-programming-2026/go-sdk/pkg/event/inbox"
+	"github.com/distributed-programming-2026/go-sdk/pkg/event/outbox"
+	"github.com/distributed-programming-2026/go-sdk/pkg/uow"
+
+	domainevent "github.com/distributed-programming-2026/lib/event"
+
+	"identity/internal/identity/config"
+	eventhandler "identity/internal/identity/infra/handlers/events"
+)
+
+func newDispatcher(logger *slog.Logger, conf config.Env, db *database, connection amqp.Connection) (event.Dispatcher, *outbox.Relay, error) {
+	// Declare the durable queue before publishing, even if the consumer is offline.
+	producer := connection.Producer(domainevent.DomainExchange(), eventQueue(conf), eventBinding(conf))
+	transport, err := eventamqp.NewDispatcher(producer)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	return outbox.Decorate(
+		event.ChainDispatcher(transport, event.DispatcherLogging(logger)),
+		uow.NewLockableUnitOfWork(db.unit),
+		outbox.Config{
+			Transport:   "rabbitmq",
+			BatchSize:   conf.Relay.BatchSize,
+			LockTimeout: conf.Relay.LockTimeout,
+		},
+	)
+}
+
+func newMessageHandler(logger *slog.Logger, conf config.Env, db *database) (amqp.Handler, error) {
+	handler, _, err := inbox.Decorate(eventhandler.NewHandler(logger), db.unit, inbox.Config{
+		Consumer: conf.AMQP.Queue,
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	return eventamqp.NewHandler(event.ChainHandler(handler, event.HandlerLogging(logger)))
+}
+
+
+===== FILE: cmd/dependencies_migrations.go =====
+
+package main
+
+import (
+	"context"
+	"log/slog"
+
+	"github.com/distributed-programming-2026/go-sdk/pkg/event/inbox"
+	"github.com/distributed-programming-2026/go-sdk/pkg/event/outbox"
+	"github.com/distributed-programming-2026/go-sdk/pkg/migrator"
+	"github.com/distributed-programming-2026/go-sdk/pkg/mysql"
+
+	"identity/internal/identity/infra/mysql/migrations"
+)
+
+func migrateDatabase(ctx context.Context, logger *slog.Logger, client mysql.TransactionalClient) error {
+	runner, err := migrator.New(client, logger)
+	if err != nil {
+		return err
+	}
+
+	targets := []struct {
+		name       string
+		migrations []migrator.Migration
+	}{
+		{
+			name:       appID,
+			migrations: migrations.Database(client),
+		},
+		{
+			name:       "event-outbox",
+			migrations: outbox.Migrations(client),
+		},
+		{
+			name:       "event-inbox",
+			migrations: inbox.Migrations(client),
+		},
+	}
+
+	for _, target := range targets {
+		err = runner.Migrate(ctx, target.name, target.migrations...)
+		if err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+
+===== FILE: cmd/dependencies_mysql.go =====
+
+package main
+
+import (
+	"context"
+	"errors"
+	"log/slog"
+
+	"github.com/distributed-programming-2026/go-sdk/pkg/mysql"
+	"github.com/distributed-programming-2026/go-sdk/pkg/uow"
+	mysqldriver "github.com/go-sql-driver/mysql"
+
+	"identity/internal/identity/config"
+	echomysql "identity/internal/identity/infra/mysql"
+)
+
+type database struct {
+	connector mysql.Connector
+	unit      uow.UnitOfWorkWithRepositoryProvider[*echomysql.RepositoryProvider]
+}
+
+func openDatabase(ctx context.Context, logger *slog.Logger, conf config.Env) (_ *database, err error) {
+	dsn := mysqldriver.NewConfig()
+	dsn.Net = "tcp"
+	dsn.Addr = conf.MySQL.Address
+	dsn.DBName = conf.MySQL.Database
+	dsn.User = conf.MySQL.User
+	dsn.Passwd = conf.MySQL.Password
+	dsn.ParseTime = true
+	dsn.Timeout = conf.MySQL.ConnectTimeout
+	dsn.ReadTimeout = conf.MySQL.ReadTimeout
+	dsn.WriteTimeout = conf.MySQL.WriteTimeout
+	dsn.Params = map[string]string{
+		"charset": "utf8mb4",
+	}
+
+	connector := mysql.NewConnector()
+	err = connector.Open(dsn.FormatDSN(), mysql.Config{
+		MaxConnections:        conf.MySQL.MaxConnections,
+		ConnectionMaxLifeTime: conf.MySQL.ConnectionMaxLifeTime,
+		ConnectionMaxIdleTime: conf.MySQL.ConnectionMaxIdleTime,
+	})
+	if err != nil {
+		return nil, err
+	}
+	defer func() {
+		if err != nil {
+			err = errors.Join(err, connector.Close())
+		}
+	}()
+
+	client := connector.TransactionalClient()
+	err = migrateDatabase(ctx, logger, client)
+	if err != nil {
+		return nil, err
+	}
+
+	unit := uow.NewUnitOfWork(mysql.NewConnectionPool(client), echomysql.NewRepositoryProvider)
+	return &database{
+		connector: connector,
+		unit:      unit,
+	}, nil
+}
+
+
+===== FILE: cmd/dependencies_servers.go =====
+
+package main
+
+import (
+	"log/slog"
+
+	grpcserver "google.golang.org/grpc"
+	"google.golang.org/grpc/reflection"
+
+	"github.com/distributed-programming-2026/lib/runtime/grpc"
+	"github.com/distributed-programming-2026/lib/runtime/http"
+
+	internalapi "identity/api/server/internalapi"
+	"identity/internal/identity/app"
+	"identity/internal/identity/config"
+	httphandler "identity/internal/identity/infra/handlers/httpapi"
+	internalhandler "identity/internal/identity/infra/handlers/internalapi"
+)
+
+func newHTTPServer(logger *slog.Logger, conf config.Env, svc *app.Service) (*http.Server, error) {
+	register, err := httphandler.Register(svc, logger)
+	if err != nil {
+		return nil, err
+	}
+
+	return http.NewServer(http.Config{
+		Address:      conf.HTTP.Address,
+		GraceTimeout: conf.App.GraceTimeout,
+	}, register)
+}
+
+func newGRPCServer(logger *slog.Logger, conf config.Env, svc *app.Service) (*grpc.Server, error) {
+	return grpc.NewServer(grpc.Config{
+		Address:      conf.GRPC.Address,
+		GraceTimeout: conf.App.GraceTimeout,
+	}, func(server *grpcserver.Server) error {
+		internalapi.RegisterIdentityServiceServer(server, internalhandler.NewHandler(svc, logger))
+		reflection.Register(server)
+		return nil
+	})
+}
+
+
+===== FILE: cmd/main.go =====
+
+package main
+
+import (
+	"context"
+	"log/slog"
+	"os"
+
+	"github.com/distributed-programming-2026/go-sdk/pkg/logging"
+	"github.com/kelseyhightower/envconfig"
+	"github.com/urfave/cli/v3"
+
+	"identity/internal/identity/config"
+
+	"github.com/distributed-programming-2026/lib/runtime"
+)
+
+const appID = "identity"
+
+type application struct {
+	logger *slog.Logger
+	conf   config.Env
+}
+
+func main() {
+	if err := runMain(); err != nil {
+		os.Exit(1)
+	}
+}
+
+func runMain() error {
+	ctx, stop := runtime.ListenOSKillSignalsContext(context.Background())
+	defer stop()
+	a := &application{
+		logger: logging.New(logging.Config{
+			AppID: appID,
+		}),
+	}
+	if err := a.command().Run(ctx, os.Args); err != nil {
+		a.logger.Error("stopped with error", logging.Error(err))
+		return err
+	}
+	a.logger.Info("stopped successfully")
+	return nil
+}
+
+func (a *application) command() *cli.Command {
+	return &cli.Command{
+		Name:           appID,
+		DefaultCommand: "service",
+		Flags: []cli.Flag{
+			&cli.BoolFlag{
+				Name: "debug",
+			},
+		},
+		Before: func(ctx context.Context, c *cli.Command) (context.Context, error) {
+			err := envconfig.Process(appID, &a.conf)
+			if err != nil {
+				return ctx, err
+			}
+			err = a.conf.Validate()
+			if err != nil {
+				return ctx, err
+			}
+			a.logger = logging.New(logging.Config{
+				AppID: appID,
+				Debug: c.Bool("debug") || a.conf.App.Debug,
+			})
+			return ctx, nil
+		},
+		Commands: []*cli.Command{
+			a.serviceCmd(),
+			a.messageHandlerCmd(),
+		},
+	}
+}
+
+
+===== FILE: cmd/messagehandler.go =====
+
+package main
+
+import (
+	"context"
+	"errors"
+	"log/slog"
+
+	"github.com/distributed-programming-2026/go-sdk/pkg/amqp"
+	"github.com/urfave/cli/v3"
+
+	domainevent "github.com/distributed-programming-2026/lib/event"
+	"github.com/distributed-programming-2026/lib/runtime/http"
+
+	"identity/internal/identity/config"
+)
+
+func (a *application) messageHandlerCmd() *cli.Command {
+	return &cli.Command{
+		Name: "message-handler",
+		Action: func(ctx context.Context, _ *cli.Command) error {
+			return messageHandler(ctx, a.logger, a.conf)
+		},
+	}
+}
+
+func messageHandler(ctx context.Context, logger *slog.Logger, conf config.Env) (err error) {
+	db, err := openDatabase(ctx, logger, conf)
+	if err != nil {
+		return err
+	}
+	defer func() {
+		err = errors.Join(err, db.connector.Close())
+	}()
+
+	handler, err := newMessageHandler(logger, conf, db)
+	if err != nil {
+		return err
+	}
+
+	consumerCtx, cancel := context.WithCancel(ctx)
+	defer cancel()
+
+	connection := newConnection(logger, conf)
+	defer func() {
+		err = errors.Join(err, connection.Stop())
+	}()
+
+	consumer := connection.Consumer(
+		consumerCtx,
+		handler,
+		domainevent.DomainExchange(),
+		eventQueue(conf),
+		eventBinding(conf),
+		&amqp.QoSConfig{
+			PrefetchCount: conf.AMQP.PrefetchCount,
+		},
+	)
+	defer func() {
+		cancel()
+		closeCtx, closeCancel := context.WithTimeout(context.Background(), conf.App.GraceTimeout)
+		defer closeCancel()
+
+		err = errors.Join(err, consumer.Close(closeCtx))
+	}()
+
+	err = connection.Start()
+	if err != nil {
+		return err
+	}
+
+	server, err := http.NewServer(http.Config{
+		Address:      conf.HTTP.Address,
+		GraceTimeout: conf.App.GraceTimeout,
+	})
+	if err != nil {
+		return err
+	}
+	return server.Serve(ctx)
+}
+
+
+===== FILE: cmd/relay.go =====
+
+package main
+
+import (
+	"context"
+	"log/slog"
+	"time"
+
+	"github.com/distributed-programming-2026/go-sdk/pkg/event/outbox"
+	"github.com/distributed-programming-2026/go-sdk/pkg/logging"
+
+	"identity/internal/identity/config"
+)
+
+func runRelay(ctx context.Context, logger *slog.Logger, relay *outbox.Relay, conf config.Relay) error {
+	ticker := time.NewTicker(conf.Interval)
+	defer ticker.Stop()
+
+	for {
+		if ctx.Err() != nil {
+			return nil
+		}
+
+		batchCtx, cancel := context.WithTimeout(ctx, conf.PublishTimeout)
+		_, err := relay.ProcessBatch(batchCtx)
+		cancel()
+		if err != nil && ctx.Err() == nil {
+			logger.Error("outbox publication failed; will retry", logging.Error(err))
+		}
+
+		select {
+		case <-ctx.Done():
+			return nil
+		case <-ticker.C:
+		}
+	}
+}
+
+
+===== FILE: cmd/service.go =====
+
+package main
+
+import (
+	"context"
+	"errors"
+	"log/slog"
+
+	"github.com/urfave/cli/v3"
+	"golang.org/x/sync/errgroup"
+
+	"identity/internal/identity/app"
+	"identity/internal/identity/config"
+)
+
+func (a *application) serviceCmd() *cli.Command {
+	return &cli.Command{
+		Name: "service",
+		Action: func(ctx context.Context, _ *cli.Command) error {
+			return service(ctx, a.logger, a.conf)
+		},
+	}
+}
+
+func service(ctx context.Context, logger *slog.Logger, conf config.Env) (err error) {
+	db, err := openDatabase(ctx, logger, conf)
+	if err != nil {
+		return err
+	}
+	defer func() {
+		err = errors.Join(err, db.connector.Close())
+	}()
+
+	connection := newConnection(logger, conf)
+	defer func() {
+		err = errors.Join(err, connection.Stop())
+	}()
+
+	_, relay, err := newDispatcher(logger, conf, db, connection)
+	if err != nil {
+		return err
+	}
+
+	err = connection.Start()
+	if err != nil {
+		return err
+	}
+
+	svc := app.NewService(db.unit)
+	httpServer, err := newHTTPServer(logger, conf, svc)
+	if err != nil {
+		return err
+	}
+
+	grpcServer, err := newGRPCServer(logger, conf, svc)
+	if err != nil {
+		return err
+	}
+
+	errGroup, egCtx := errgroup.WithContext(ctx)
+	errGroup.Go(func() error {
+		return httpServer.Serve(egCtx)
+	})
+	errGroup.Go(func() error {
+		return grpcServer.Serve(egCtx)
+	})
+	errGroup.Go(func() error {
+		return runRelay(egCtx, logger, relay, conf.Relay)
+	})
+	return errGroup.Wait()
+}
+
+
+===== FILE: compose.yaml =====
+
+services:
+  identity-service:
+    image: distributed-programming-identity:local
+    build:
+      context: ./modules/identity
+      dockerfile: Dockerfile
+    environment:
+      IDENTITY_MYSQL_ADDRESS: mysql:3306
+      IDENTITY_AMQP_URL: amqp://local:local@rabbitmq:5672/
+    ports:
+      - "${IDENTITY_GRPC_PORT:-8081}:8081"
+      - "${IDENTITY_HTTP_PORT:-8082}:8082"
+    depends_on:
+      mysql:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+
+  identity-message-handler:
+    image: distributed-programming-identity:local
+    command: [message-handler]
+    environment:
+      IDENTITY_MYSQL_ADDRESS: mysql:3306
+      IDENTITY_AMQP_URL: amqp://local:local@rabbitmq:5672/
+    ports:
+      - "${IDENTITY_MESSAGE_HANDLER_PORT:-8083}:8082"
+    depends_on:
+      identity-service:
+        condition: service_started
+      mysql:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+
+
+===== FILE: config/gateway/routes.yaml =====
+
+kind: gateway/service/v1
+name: identity
+weight: 100
+routes:
+  - pattern: '^/api/v1/identity/me$'
+    allowedMethods: [GET, PATCH]
+    target: identity-service:8082
+    interceptors:
+      - id: session
+
+
+===== FILE: docker/mysql/init.sql =====
+
+CREATE DATABASE IF NOT EXISTS `identity` CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
+CREATE USER IF NOT EXISTS 'identity'@'%' IDENTIFIED BY 'identity';
+GRANT ALL PRIVILEGES ON `identity`.* TO 'identity'@'%';
+
+
+===== FILE: go.mod =====
+
+module identity
+
+go 1.27.1
+
+require (
+	github.com/distributed-programming-2026/go-sdk/pkg/amqp v0.0.3
+	github.com/distributed-programming-2026/go-sdk/pkg/event v0.0.3
+	github.com/distributed-programming-2026/go-sdk/pkg/logging v0.0.3
+	github.com/distributed-programming-2026/go-sdk/pkg/migrator v0.0.3
+	github.com/distributed-programming-2026/go-sdk/pkg/mysql v0.0.3
+	github.com/distributed-programming-2026/go-sdk/pkg/uow v0.0.3
+	github.com/distributed-programming-2026/lib v0.0.0
+	github.com/getkin/kin-openapi v0.149.0
+	github.com/go-chi/chi/v5 v5.3.2
+	github.com/go-sql-driver/mysql v1.10.1
+	github.com/kelseyhightower/envconfig v1.4.0
+	github.com/stretchr/testify v1.12.1
+	github.com/testcontainers/testcontainers-go v0.44.0
+	github.com/testcontainers/testcontainers-go/modules/mysql v0.44.0
+	github.com/urfave/cli/v3 v3.14.0
+	golang.org/x/sync v0.22.0
+	google.golang.org/grpc v1.84.0
+	google.golang.org/protobuf v1.36.12
+)
+
+require (
+	dario.cat/mergo v1.0.2 // indirect
+	filippo.io/edwards25519 v1.2.0 // indirect
+	github.com/Azure/go-ansiterm v0.0.0-20250102033503-faa5f7b0171c // indirect
+	github.com/Microsoft/go-winio v0.6.2 // indirect
+	github.com/cenkalti/backoff/v4 v4.3.0 // indirect
+	github.com/cespare/xxhash/v2 v2.3.0 // indirect
+	github.com/containerd/errdefs v1.0.0 // indirect
+	github.com/containerd/errdefs/pkg v0.3.0 // indirect
+	github.com/containerd/log v0.1.0 // indirect
+	github.com/containerd/platforms v0.2.1 // indirect
+	github.com/cpuguy83/dockercfg v0.3.2 // indirect
+	github.com/distributed-programming-2026/go-sdk/internal/sharedpool v0.0.3 // indirect
+	github.com/distribution/reference v0.6.0 // indirect
+	github.com/docker/go-connections v0.7.0 // indirect
+	github.com/docker/go-units v0.5.0 // indirect
+	github.com/ebitengine/purego v0.10.1 // indirect
+	github.com/felixge/httpsnoop v1.1.0 // indirect
+	github.com/go-logr/logr v1.4.3 // indirect
+	github.com/go-logr/stdr v1.2.2 // indirect
+	github.com/go-ole/go-ole v1.3.0 // indirect
+	github.com/go-openapi/jsonpointer v0.22.5 // indirect
+	github.com/go-openapi/swag/jsonname v0.25.5 // indirect
+	github.com/google/uuid v1.6.0 // indirect
+	github.com/jmoiron/sqlx v1.4.0 // indirect
+	github.com/klauspost/compress v1.18.6 // indirect
+	github.com/lufia/plan9stats v0.0.0-20260330125221-c963978e514e // indirect
+	github.com/magiconair/properties v1.8.10 // indirect
+	github.com/moby/docker-image-spec v1.3.1 // indirect
+	github.com/moby/go-archive v0.2.0 // indirect
+	github.com/moby/moby/api v1.55.0 // indirect
+	github.com/moby/moby/client v0.5.0 // indirect
+	github.com/moby/patternmatcher v0.6.1 // indirect
+	github.com/moby/sys/sequential v0.7.0 // indirect
+	github.com/moby/sys/user v0.4.0 // indirect
+	github.com/moby/sys/userns v0.1.0 // indirect
+	github.com/moby/term v0.5.2 // indirect
+	github.com/oasdiff/yaml v0.1.1 // indirect
+	github.com/oasdiff/yaml3 v0.0.14 // indirect
+	github.com/opencontainers/go-digest v1.0.0 // indirect
+	github.com/opencontainers/image-spec v1.1.1 // indirect
+	github.com/power-devops/perfstat v0.0.0-20240221224432-82ca36839d55 // indirect
+	github.com/rabbitmq/amqp091-go v1.15.0 // indirect
+	github.com/santhosh-tekuri/jsonschema/v6 v6.0.3 // indirect
+	github.com/shirou/gopsutil/v4 v4.26.6 // indirect
+	github.com/sirupsen/logrus v1.9.4 // indirect
+	github.com/tklauser/go-sysconf v0.4.0 // indirect
+	github.com/tklauser/numcpus v0.12.0 // indirect
+	github.com/yusufpapurcu/wmi v1.2.4 // indirect
+	go.opentelemetry.io/auto/sdk v1.2.1 // indirect
+	go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp v0.69.0 // indirect
+	go.opentelemetry.io/otel v1.44.0 // indirect
+	go.opentelemetry.io/otel/metric v1.44.0 // indirect
+	go.opentelemetry.io/otel/trace v1.44.0 // indirect
+	go.yaml.in/yaml/v3 v3.0.5 // indirect
+	golang.org/x/crypto v0.54.0 // indirect
+	golang.org/x/net v0.57.0 // indirect
+	golang.org/x/sys v0.47.0 // indirect
+	golang.org/x/text v0.40.0 // indirect
+	google.golang.org/genproto/googleapis/rpc v0.0.0-20260706201446-f0a921348800 // indirect
+)
+
+replace github.com/distributed-programming-2026/lib => ../../lib
+
+
+===== FILE: go.sum =====
+
+dario.cat/mergo v1.0.2 h1:85+piFYR1tMbRrLcDwR18y4UKJ3aH1Tbzi24VRW1TK8=
+dario.cat/mergo v1.0.2/go.mod h1:E/hbnu0NxMFBjpMIE34DRGLWqDy0g5FuKDhCb31ngxA=
+filippo.io/edwards25519 v1.1.0/go.mod h1:BxyFTGdWcka3PhytdK4V28tE5sGfRvvvRV7EaN4VDT4=
+filippo.io/edwards25519 v1.2.0 h1:crnVqOiS4jqYleHd9vaKZ+HKtHfllngJIiOpNpoJsjo=
+filippo.io/edwards25519 v1.2.0/go.mod h1:xzAOLCNug/yB62zG1bQ8uziwrIqIuxhctzJT18Q77mc=
+github.com/AdaLogics/go-fuzz-headers v0.0.0-20240806141605-e8a1dd7889d6 h1:He8afgbRMd7mFxO99hRNu+6tazq8nFF9lIwo9JFroBk=
+github.com/AdaLogics/go-fuzz-headers v0.0.0-20240806141605-e8a1dd7889d6/go.mod h1:8o94RPi1/7XTJvwPpRSzSUedZrtlirdB3r9Z20bi2f8=
+github.com/Azure/go-ansiterm v0.0.0-20250102033503-faa5f7b0171c h1:udKWzYgxTojEKWjV8V+WSxDXJ4NFATAsZjh8iIbsQIg=
+github.com/Azure/go-ansiterm v0.0.0-20250102033503-faa5f7b0171c/go.mod h1:xomTg63KZ2rFqZQzSB4Vz2SUXa1BpHTVz9L5PTmPC4E=
+github.com/Microsoft/go-winio v0.6.2 h1:F2VQgta7ecxGYO8k3ZZz3RS8fVIXVxONVUPlNERoyfY=
+github.com/Microsoft/go-winio v0.6.2/go.mod h1:yd8OoFMLzJbo9gZq8j5qaps8bJ9aShtEA8Ipt1oGCvU=
+github.com/cenkalti/backoff/v4 v4.3.0 h1:MyRJ/UdXutAwSAT+s3wNd7MfTIcy71VQueUuFK343L8=
+github.com/cenkalti/backoff/v4 v4.3.0/go.mod h1:Y3VNntkOUPxTVeUxJ/G5vcM//AlwfmyYozVcomhLiZE=
+github.com/cespare/xxhash/v2 v2.3.0 h1:UL815xU9SqsFlibzuggzjXhog7bL6oX9BbNZnL2UFvs=
+github.com/cespare/xxhash/v2 v2.3.0/go.mod h1:VGX0DQ3Q6kWi7AoAeZDth3/j3BFtOZR5XLFGgcrjCOs=
+github.com/containerd/errdefs v1.0.0 h1:tg5yIfIlQIrxYtu9ajqY42W3lpS19XqdxRQeEwYG8PI=
+github.com/containerd/errdefs v1.0.0/go.mod h1:+YBYIdtsnF4Iw6nWZhJcqGSg/dwvV7tyJ/kCkyJ2k+M=
+github.com/containerd/errdefs/pkg v0.3.0 h1:9IKJ06FvyNlexW690DXuQNx2KA2cUJXx151Xdx3ZPPE=
+github.com/containerd/errdefs/pkg v0.3.0/go.mod h1:NJw6s9HwNuRhnjJhM7pylWwMyAkmCQvQ4GpJHEqRLVk=
+github.com/containerd/log v0.1.0 h1:TCJt7ioM2cr/tfR8GPbGf9/VRAX8D2B4PjzCpfX540I=
+github.com/containerd/log v0.1.0/go.mod h1:VRRf09a7mHDIRezVKTRCrOq78v577GXq3bSa3EhrzVo=
+github.com/containerd/platforms v0.2.1 h1:zvwtM3rz2YHPQsF2CHYM8+KtB5dvhISiXh5ZpSBQv6A=
+github.com/containerd/platforms v0.2.1/go.mod h1:XHCb+2/hzowdiut9rkudds9bE5yJ7npe7dG/wG+uFPw=
+github.com/cpuguy83/dockercfg v0.3.2 h1:DlJTyZGBDlXqUZ2Dk2Q3xHs/FtnooJJVaad2S9GKorA=
+github.com/cpuguy83/dockercfg v0.3.2/go.mod h1:sugsbF4//dDlL/i+S+rtpIWp+5h0BHJHfjj5/jFyUJc=
+github.com/creack/pty v1.1.24 h1:bJrF4RRfyJnbTJqzRLHzcGaZK1NeM5kTC9jGgovnR1s=
+github.com/creack/pty v1.1.24/go.mod h1:08sCNb52WyoAwi2QDyzUCTgcvVFhUzewun7wtTfvcwE=
+github.com/distributed-programming-2026/go-sdk/internal/sharedpool v0.0.3 h1:CQRLL6C6CuJ1UVOLjgMHSAEip4wAr8uBIJYlPallfyM=
+github.com/distributed-programming-2026/go-sdk/internal/sharedpool v0.0.3/go.mod h1:1tkkxetXP7OdRJLRd8nl4x08RLrfsGcRTe+cPmIXKkw=
+github.com/distributed-programming-2026/go-sdk/pkg/amqp v0.0.3 h1:JYrMPqaU/EtkzijDBh8KjwQ1XL7PgVJk5GlEMAN5EMU=
+github.com/distributed-programming-2026/go-sdk/pkg/amqp v0.0.3/go.mod h1:KNPxhsZaNFMfLV3g0HdIsuB+Wm/9E0NPP6PwNnNYTco=
+github.com/distributed-programming-2026/go-sdk/pkg/event v0.0.3 h1:7Y0VYJYJm++by30VW1CuS+NliALFJHtJyPqxEgZzKeg=
+github.com/distributed-programming-2026/go-sdk/pkg/event v0.0.3/go.mod h1:8N3vCmPny+8yC6v1zE/nhhgRSOaViLS/ZSMet3SOhHk=
+github.com/distributed-programming-2026/go-sdk/pkg/logging v0.0.3 h1:NByT+Yg3GFijMDV0oiWcOBR9xBrOlzHsLJWMjOxCj+k=
+github.com/distributed-programming-2026/go-sdk/pkg/logging v0.0.3/go.mod h1:UNWmHHdykfxwCywHYOz7meUwPLHiOEXYtmFZ/ZculF8=
+github.com/distributed-programming-2026/go-sdk/pkg/migrator v0.0.3 h1:PdnnCNUhZVnmDB0xLDMOKp+yMhzW/Flhz4kY8udx9wM=
+github.com/distributed-programming-2026/go-sdk/pkg/migrator v0.0.3/go.mod h1:T916om2q40vGr6ez84CLDLZW9W8RtKdnbx9HfyWIdcw=
+github.com/distributed-programming-2026/go-sdk/pkg/mysql v0.0.3 h1:TMEpTtOBt8WWHVdq+5I6BA8vaMdv5CmGbCKw2BtmCdo=
+github.com/distributed-programming-2026/go-sdk/pkg/mysql v0.0.3/go.mod h1:PEGQn/a/bfDmMQhx6/dkiaza84ywPxOCvF39CuIBqN8=
+github.com/distributed-programming-2026/go-sdk/pkg/uow v0.0.3 h1:zqaOzhlZcJgWCpdnivwzzdDZBiYMBMFUCUHxze/cNV4=
+github.com/distributed-programming-2026/go-sdk/pkg/uow v0.0.3/go.mod h1:2o0NCVQNwZmmw65wjb64jLVa+a/R0DtW58JmWynkiWg=
+github.com/distribution/reference v0.6.0 h1:0IXCQ5g4/QMHHkarYzh5l+u8T3t73zM5QvfrDyIgxBk=
+github.com/distribution/reference v0.6.0/go.mod h1:BbU0aIcezP1/5jX/8MP0YiH4SdvB5Y4f/wlDRiLyi3E=
+github.com/dlclark/regexp2 v1.11.0 h1:G/nrcoOa7ZXlpoa/91N3X7mM3r8eIlMBBJZvsz/mxKI=
+github.com/dlclark/regexp2 v1.11.0/go.mod h1:DHkYz0B9wPfa6wondMfaivmHpzrQ3v9q8cnmRbL6yW8=
+github.com/docker/go-connections v0.7.0 h1:6SsRfJddP22WMrCkj19x9WKjEDTB+ahsdiGYf0mN39c=
+github.com/docker/go-connections v0.7.0/go.mod h1:no1qkHdjq7kLMGUXYAduOhYPSJxxvgWBh7ogVvptn3Q=
+github.com/docker/go-units v0.5.0 h1:69rxXcBk27SvSaaxTtLh/8llcHD8vYHT7WSdRZ/jvr4=
+github.com/docker/go-units v0.5.0/go.mod h1:fgPhTUdO+D/Jk86RDLlptpiXQzgHJF7gydDDbaIK4Dk=
+github.com/ebitengine/purego v0.10.1 h1:dewVBCBT2GaMu1SrNTYxQhgQBethzfhiwvZiLGP/qyY=
+github.com/ebitengine/purego v0.10.1/go.mod h1:iIjxzd6CiRiOG0UyXP+V1+jWqUXVjPKLAI0mRfJZTmQ=
+github.com/felixge/httpsnoop v1.1.0 h1:3YtUj32ZZkqZtt3sZZsClsymw/QDuVfpNhoA31zeORc=
+github.com/felixge/httpsnoop v1.1.0/go.mod h1:Zqxgdd+1Rkcz8euOqdr7lqgCRJztwr5hp9vDSi5UZCE=
+github.com/getkin/kin-openapi v0.149.0 h1:ZbhmVJ4yq5RZDUsyP8lcBcGMsjsaTqXEFt6isdtMDfA=
+github.com/getkin/kin-openapi v0.149.0/go.mod h1:1+BHDzstro+P5CKtPy1X4PfofnFgmRe6uvMy9+r9fKY=
+github.com/go-chi/chi/v5 v5.3.2 h1:5YQkICvTCSZ25hoRsyJazN0scjzKGiu4VAUc7H1o1nY=
+github.com/go-chi/chi/v5 v5.3.2/go.mod h1:R+tYY2hNuVUUjxoPtqUdgBqevM9s9njzkTLutVsOCto=
+github.com/go-logr/logr v1.2.2/go.mod h1:jdQByPbusPIv2/zmleS9BjJVeZ6kBagPoEUsqbVz/1A=
+github.com/go-logr/logr v1.4.3 h1:CjnDlHq8ikf6E492q6eKboGOC0T8CDaOvkHCIg8idEI=
+github.com/go-logr/logr v1.4.3/go.mod h1:9T104GzyrTigFIr8wt5mBrctHMim0Nb2HLGrmQ40KvY=
+github.com/go-logr/stdr v1.2.2 h1:hSWxHoqTgW2S2qGc0LTAI563KZ5YKYRhT3MFKZMbjag=
+github.com/go-logr/stdr v1.2.2/go.mod h1:mMo/vtBO5dYbehREoey6XUKy/eSumjCCveDpRre4VKE=
+github.com/go-ole/go-ole v1.2.6/go.mod h1:pprOEPIfldk/42T2oK7lQ4v4JSDwmV0As9GaiUsvbm0=
+github.com/go-ole/go-ole v1.3.0 h1:Dt6ye7+vXGIKZ7Xtk4s6/xVdGDQynvom7xCFEdWr6uE=
+github.com/go-ole/go-ole v1.3.0/go.mod h1:5LS6F96DhAwUc7C+1HLexzMXY1xGRSryjyPPKW6zv78=
+github.com/go-openapi/jsonpointer v0.22.5 h1:8on/0Yp4uTb9f4XvTrM2+1CPrV05QPZXu+rvu2o9jcA=
+github.com/go-openapi/jsonpointer v0.22.5/go.mod h1:gyUR3sCvGSWchA2sUBJGluYMbe1zazrYWIkWPjjMUY0=
+github.com/go-openapi/swag/jsonname v0.25.5 h1:8p150i44rv/Drip4vWI3kGi9+4W9TdI3US3uUYSFhSo=
+github.com/go-openapi/swag/jsonname v0.25.5/go.mod h1:jNqqikyiAK56uS7n8sLkdaNY/uq6+D2m2LANat09pKU=
+github.com/go-openapi/testify/v2 v2.4.0 h1:8nsPrHVCWkQ4p8h1EsRVymA2XABB4OT40gcvAu+voFM=
+github.com/go-openapi/testify/v2 v2.4.0/go.mod h1:HCPmvFFnheKK2BuwSA0TbbdxJ3I16pjwMkYkP4Ywn54=
+github.com/go-sql-driver/mysql v1.8.1/go.mod h1:wEBSXgmK//2ZFJyE+qWnIsVGmvmEKlqwuVSjsCm7DZg=
+github.com/go-sql-driver/mysql v1.10.1 h1:arlSnNLq6a5yxGxV7qg9lF4j0C+KwD6NbQyKr9QL6ME=
+github.com/go-sql-driver/mysql v1.10.1/go.mod h1:M+cqaI7+xxXGG9swrdeUIoPG3Y3KCkF0pZej+SK+nWk=
+github.com/golang/protobuf v1.5.4 h1:i7eJL8qZTpSEXOPTxNKhASYpMn+8e5Q6AdndVa1dWek=
+github.com/golang/protobuf v1.5.4/go.mod h1:lnTiLA8Wa4RWRcIUkrtSVa5nRhsEGBg48fD6rSs7xps=
+github.com/google/go-cmp v0.7.0 h1:wk8382ETsv4JYUZwIsn6YpYiWiBsYLSJiTsyBybVuN8=
+github.com/google/go-cmp v0.7.0/go.mod h1:pXiqmnSA92OHEEa9HXL2W4E7lf9JzCmGVUdgjX3N/iU=
+github.com/google/uuid v1.6.0 h1:NIvaJDMOsjHA8n1jAhLSgzrAzy1Hgr+hNrb57e+94F0=
+github.com/google/uuid v1.6.0/go.mod h1:TIyPZe4MgqvfeYDBFedMoGGpEw/LqOeaOT+nhxU+yHo=
+github.com/jmoiron/sqlx v1.4.0 h1:1PLqN7S1UYp5t4SrVVnt4nUVNemrDAtxlulVe+Qgm3o=
+github.com/jmoiron/sqlx v1.4.0/go.mod h1:ZrZ7UsYB/weZdl2Bxg6jCRO9c3YHl8r3ahlKmRT4JLY=
+github.com/kelseyhightower/envconfig v1.4.0 h1:Im6hONhd3pLkfDFsbRgu68RDNkGF1r3dvMUtDTo2cv8=
+github.com/kelseyhightower/envconfig v1.4.0/go.mod h1:cccZRl6mQpaq41TPp5QxidR+Sa3axMbJDNb//FQX6Gg=
+github.com/klauspost/compress v1.18.6 h1:2jupLlAwFm95+YDR+NwD2MEfFO9d4z4Prjl1XXDjuao=
+github.com/klauspost/compress v1.18.6/go.mod h1:cwPg85FWrGar70rWktvGQj8/hthj3wpl0PGDogxkrSQ=
+github.com/kr/pretty v0.3.1 h1:flRD4NNwYAUpkphVc1HcthR4KEIFJ65n8Mw5qdRn3LE=
+github.com/kr/pretty v0.3.1/go.mod h1:hoEshYVHaxMs3cyo3Yncou5ZscifuDolrwPKZanG3xk=
+github.com/kr/text v0.2.0 h1:5Nx0Ya0ZqY2ygV366QzturHI13Jq95ApcVaJBhpS+AY=
+github.com/kr/text v0.2.0/go.mod h1:eLer722TekiGuMkidMxC/pM04lWEeraHUUmBw8l2grE=
+github.com/lib/pq v1.10.9 h1:YXG7RB+JIjhP29X+OtkiDnYaXQwpS4JEWq7dtCCRUEw=
+github.com/lib/pq v1.10.9/go.mod h1:AlVN5x4E4T544tWzH6hKfbfQvm3HdbOxrmggDNAPY9o=
+github.com/lufia/plan9stats v0.0.0-20260330125221-c963978e514e h1:Q6MvJtQK/iRcRtzAscm/zF23XxJlbECiGPyRicsX+Ak=
+github.com/lufia/plan9stats v0.0.0-20260330125221-c963978e514e/go.mod h1:autxFIvghDt3jPTLoqZ9OZ7s9qTGNAWmYCjVFWPX/zg=
+github.com/magiconair/properties v1.8.10 h1:s31yESBquKXCV9a/ScB3ESkOjUYYv+X0rg8SYxI99mE=
+github.com/magiconair/properties v1.8.10/go.mod h1:Dhd985XPs7jluiymwWYZ0G4Z61jb3vdS329zhj2hYo0=
+github.com/mattn/go-sqlite3 v1.14.22 h1:2gZY6PC6kBnID23Tichd1K+Z0oS6nE/XwU+Vz/5o4kU=
+github.com/mattn/go-sqlite3 v1.14.22/go.mod h1:Uh1q+B4BYcTPb+yiD3kU8Ct7aC0hY9fxUwlHK0RXw+Y=
+github.com/moby/docker-image-spec v1.3.1 h1:jMKff3w6PgbfSa69GfNg+zN/XLhfXJGnEx3Nl2EsFP0=
+github.com/moby/docker-image-spec v1.3.1/go.mod h1:eKmb5VW8vQEh/BAr2yvVNvuiJuY6UIocYsFu/DxxRpo=
+github.com/moby/go-archive v0.2.0 h1:zg5QDUM2mi0JIM9fdQZWC7U8+2ZfixfTYoHL7rWUcP8=
+github.com/moby/go-archive v0.2.0/go.mod h1:mNeivT14o8xU+5q1YnNrkQVpK+dnNe/K6fHqnTg4qPU=
+github.com/moby/moby/api v1.55.0 h1:2/sexvQyqIWS8pRSCFddBfpW2qE7vR7FCL+vN8pxwMc=
+github.com/moby/moby/api v1.55.0/go.mod h1:+RQ6wluLwtYaTd1WnPLykIDPekkuyD/ROWQClE83pzs=
+github.com/moby/moby/client v0.5.0 h1:5XhyPk2fuOWf6RlSFa3MkIIgDZkF25xToXW8Q/BH7cc=
+github.com/moby/moby/client v0.5.0/go.mod h1:rcVpF8ncl9vo5gaIBdol6CnbEtSj1uxMvEV/UrykF/s=
+github.com/moby/patternmatcher v0.6.1 h1:qlhtafmr6kgMIJjKJMDmMWq7WLkKIo23hsrpR3x084U=
+github.com/moby/patternmatcher v0.6.1/go.mod h1:hDPoyOpDY7OrrMDLaYoY3hf52gNCR/YOUYxkhApJIxc=
+github.com/moby/sys/sequential v0.7.0 h1:ASQNGNROJSuOO6LL6bPHbKvuZu6NU8P4ldPWk31zj/8=
+github.com/moby/sys/sequential v0.7.0/go.mod h1:NfSTAp6V3fw4tmkD62PEcOKeZKquXT8VKCkf7aVR79o=
+github.com/moby/sys/user v0.4.0 h1:jhcMKit7SA80hivmFJcbB1vqmw//wU61Zdui2eQXuMs=
+github.com/moby/sys/user v0.4.0/go.mod h1:bG+tYYYJgaMtRKgEmuueC0hJEAZWwtIbZTB+85uoHjs=
+github.com/moby/sys/userns v0.1.0 h1:tVLXkFOxVu9A64/yh59slHVv9ahO9UIev4JZusOLG/g=
+github.com/moby/sys/userns v0.1.0/go.mod h1:IHUYgu/kao6N8YZlp9Cf444ySSvCmDlmzUcYfDHOl28=
+github.com/moby/term v0.5.2 h1:6qk3FJAFDs6i/q3W/pQ97SX192qKfZgGjCQqfCJkgzQ=
+github.com/moby/term v0.5.2/go.mod h1:d3djjFCrjnB+fl8NJux+EJzu0msscUP+f8it8hPkFLc=
+github.com/oasdiff/yaml v0.1.1 h1:6nHx+pn9gBRM6YpBlFZFQGCCd1nuvqOBtTD3KKTgGxY=
+github.com/oasdiff/yaml v0.1.1/go.mod h1:EYJNoyktvWMJ0Hmhx+6qTaqMOsalUaRGT8Sj1hNcegU=
+github.com/oasdiff/yaml3 v0.0.14 h1:aLJee3hxBK2H5wdXd9iPcIXb93Nty1Ge0pT171eHtkw=
+github.com/oasdiff/yaml3 v0.0.14/go.mod h1:csto2xfDjYccdUn/yw/bPjj/cYTdp6HtFA0J4TWG+gg=
+github.com/opencontainers/go-digest v1.0.0 h1:apOUWs51W5PlhuyGyz9FCeeBIOUDA/6nW8Oi/yOhh5U=
+github.com/opencontainers/go-digest v1.0.0/go.mod h1:0JzlMkj0TRzQZfJkVvzbP0HBR3IKzErnv2BNG4W4MAM=
+github.com/opencontainers/image-spec v1.1.1 h1:y0fUlFfIZhPF1W537XOLg0/fcx6zcHCJwooC2xJA040=
+github.com/opencontainers/image-spec v1.1.1/go.mod h1:qpqAh3Dmcf36wStyyWU+kCeDgrGnAve2nCC8+7h8Q0M=
+github.com/power-devops/perfstat v0.0.0-20240221224432-82ca36839d55 h1:o4JXh1EVt9k/+g42oCprj/FisM4qX9L3sZB3upGN2ZU=
+github.com/power-devops/perfstat v0.0.0-20240221224432-82ca36839d55/go.mod h1:OmDBASR4679mdNQnz2pUhc2G8CO2JrUAVFDRBDP/hJE=
+github.com/rabbitmq/amqp091-go v1.15.0 h1:LEQL4/yp48/Wigt6A6XOu18RQRo8ZHtB5I/KZJn+gkw=
+github.com/rabbitmq/amqp091-go v1.15.0/go.mod h1:Hy4jKW5kQART1u+JkDTF9YYOQUHXqMuhrgxOEeS7G4o=
+github.com/rogpeppe/go-internal v1.14.1 h1:UQB4HGPB6osV0SQTLymcB4TgvyWu6ZyliaW0tI/otEQ=
+github.com/rogpeppe/go-internal v1.14.1/go.mod h1:MaRKkUm5W0goXpeCfT7UZI6fk/L7L7so1lCWt35ZSgc=
+github.com/santhosh-tekuri/jsonschema/v6 v6.0.3 h1:1EYB5IzjZawrrnELUi78f9fPu57HuXjmddZPjrls/28=
+github.com/santhosh-tekuri/jsonschema/v6 v6.0.3/go.mod h1:JXeL+ps8p7/KNMjDQk3TCwPpBy0wYklyWTfbkIzdIFU=
+github.com/shirou/gopsutil/v4 v4.26.6 h1:Mzr/npDtQC/xpeEuQKHZt8Zo9CmPvhTj8nkR8w5TLDs=
+github.com/shirou/gopsutil/v4 v4.26.6/go.mod h1:LZ6ewCSkBqUpvSOf+LsTGnRinC6iaNUNMGBtDkJBaLQ=
+github.com/sirupsen/logrus v1.9.4 h1:TsZE7l11zFCLZnZ+teH4Umoq5BhEIfIzfRDZ1Uzql2w=
+github.com/sirupsen/logrus v1.9.4/go.mod h1:ftWc9WdOfJ0a92nsE2jF5u5ZwH8Bv2zdeOC42RjbV2g=
+github.com/stretchr/objx v0.5.3 h1:jmXUvGomnU1o3W/V5h2VEradbpJDwGrzugQQvL0POH4=
+github.com/stretchr/objx v0.5.3/go.mod h1:rDQraq+vQZU7Fde9LOZLr8Tax6zZvy4kuNKF+QYS+U0=
+github.com/stretchr/testify v1.12.1 h1:EuwCh5fleGS7H32xRwO3wRGT7DxrDhLAT6FF8MpWDWE=
+github.com/stretchr/testify v1.12.1/go.mod h1:MDEgiDPPsNp5cuIrHPPCyornHKgEVbtFUmoNlxoYthg=
+github.com/testcontainers/testcontainers-go v0.44.0 h1:/Fwh6HY1mIikhnm9e7HwoxGycx0lzRAE0f5VQpjFxzI=
+github.com/testcontainers/testcontainers-go v0.44.0/go.mod h1:IcnwQrYTO86xHXu5bvMaBH7ATlbS3Qn1M1QWW3c66rE=
+github.com/testcontainers/testcontainers-go/modules/mysql v0.44.0 h1:oJPJPxNE6YQ0zlq6mZKh06JOlyimCky4ruQUimdDet4=
+github.com/testcontainers/testcontainers-go/modules/mysql v0.44.0/go.mod h1:MSOAU6ukCpehJVHQDN1k9JgOZXZuqHD+2pT20M3JkIg=
+github.com/tklauser/go-sysconf v0.4.0 h1:7H0uAN+7RkwWRaxhYXDLqa5V3LPrJeV8wmD9dRUgPQU=
+github.com/tklauser/go-sysconf v0.4.0/go.mod h1:8mTNWyog7H+MpKijp4VmKJAd2bbYQ2zuUwkYRbUArPI=
+github.com/tklauser/numcpus v0.12.0 h1:NR85qdvHA9pFse3x3weVZ0r0ST8R6l5RHbZrlRaqob4=
+github.com/tklauser/numcpus v0.12.0/go.mod h1:ABHeXzJnr/qqwguhClkZKT1/8VABcYrsyUiUGobwWJg=
+github.com/urfave/cli/v3 v3.14.0 h1:a8414NQlHJs0c/iBsulKLzlES0n/lEAskbL2LKpU4/s=
+github.com/urfave/cli/v3 v3.14.0/go.mod h1:vXn6HxPNccJSzQr2QvwVncOKrgYGIHU0HY5h8B2nQj4=
+github.com/yusufpapurcu/wmi v1.2.4 h1:zFUKzehAFReQwLys1b/iSMl+JQGSCSjtVqQn9bBrPo0=
+github.com/yusufpapurcu/wmi v1.2.4/go.mod h1:SBZ9tNy3G9/m5Oi98Zks0QjeHVDvuK0qfxQmPyzfmi0=
+go.opentelemetry.io/auto/sdk v1.2.1 h1:jXsnJ4Lmnqd11kwkBV2LgLoFMZKizbCi5fNZ/ipaZ64=
+go.opentelemetry.io/auto/sdk v1.2.1/go.mod h1:KRTj+aOaElaLi+wW1kO/DZRXwkF4C5xPbEe3ZiIhN7Y=
+go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp v0.69.0 h1:8tvICD4vSTOOsNrsI4Ljf6C+6UKvpTEH5XY3JMoyPoo=
+go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp v0.69.0/go.mod h1:z9+yiacE0IHRqM4qFfkbt/JYlmYXgss8GY/jXoNuPJI=
+go.opentelemetry.io/otel v1.44.0 h1:JjwHmHpA4iZ3wBxluu2fbbE7j4kqlE8jXyAyPXH7HqU=
+go.opentelemetry.io/otel v1.44.0/go.mod h1:BMgjTHL9WPRlRjL2oZCBTL4whCGtXch2H4BhOPIAyYc=
+go.opentelemetry.io/otel/metric v1.44.0 h1:1w0gILTcHdr3YI+ixLyjemwrVnsMURbTZFrSYCdDdmc=
+go.opentelemetry.io/otel/metric v1.44.0/go.mod h1:8O7hanEPBNgEMmybD3s2VBKcgWOCsA6tzHBPODAiquo=
+go.opentelemetry.io/otel/sdk v1.44.0 h1:nHYwb9lK+fJPU/dnT6s7W7Z8itMWyqrnVfbheVYrZ58=
+go.opentelemetry.io/otel/sdk v1.44.0/go.mod h1:Osuydd3Se74nqjAKxid74N5eC+jfEqfTegHRnq58oK0=
+go.opentelemetry.io/otel/sdk/metric v1.44.0 h1:3LlKgI+VjbVsjNRFZJZAJ30WjXC5VkNRks6si09iEfI=
+go.opentelemetry.io/otel/sdk/metric v1.44.0/go.mod h1:5B5pMARnXxKhltooO4xUuCBorl65a4EpnTalObqOigA=
+go.opentelemetry.io/otel/trace v1.44.0 h1:jxF5CsGYCe74MCRx2X4g7WsY/VBKRqqpNvXlX/6gtIk=
+go.opentelemetry.io/otel/trace v1.44.0/go.mod h1:oLl1jrMQAVo6v3GAggN+1VH9VIz9iUSvW53sW1Q8PIE=
+go.uber.org/goleak v1.3.0 h1:2K3zAYmnTNqV73imy9J1T3WC+gmCePx2hEGkimedGto=
+go.uber.org/goleak v1.3.0/go.mod h1:CoHD4mav9JJNrW/WLlf7HGZPjdw8EucARQHekz1X6bE=
+go.yaml.in/yaml/v3 v3.0.5 h1:N6y/pJk8buWs9NY5ERU2HSMfm+IuD/OtfdAnq6kESPw=
+go.yaml.in/yaml/v3 v3.0.5/go.mod h1:HVTZu1O7/Vkt2N+BFy8Zza+lnLsABggaTM2ZpNIGuKg=
+golang.org/x/crypto v0.54.0 h1:YLIA59K4fiNzHzjnZt2tUJQjQtUWfWbeHBqKtk3eScw=
+golang.org/x/crypto v0.54.0/go.mod h1:KWL8ny2AZdGR2cWmzeHrp2azQPGogOv+HeQaVEXC2dk=
+golang.org/x/net v0.57.0 h1:K5+3DljvIuDG9/Jv9rvyMywYNFCQ9RSUY6OOTTkT+tE=
+golang.org/x/net v0.57.0/go.mod h1:KpXc8iv+r3XplLAG/f7Jsf9RPszJzdR0f58q9vGOuEU=
+golang.org/x/sync v0.22.0 h1:SZjpbeLmrCk4xhRSZFNZW5gFUeCeFgjekvI/+gfScek=
+golang.org/x/sync v0.22.0/go.mod h1:9xrNwdLfx4jkKbNva9FpL6vEN7evnE43NNNJQ2LF3+0=
+golang.org/x/sys v0.0.0-20190916202348-b4ddaad3f8a3/go.mod h1:h1NjWce9XRLGQEsW7wpKNCjG9DtNlClVuFLEZdDNbEs=
+golang.org/x/sys v0.0.0-20201204225414-ed752295db88/go.mod h1:h1NjWce9XRLGQEsW7wpKNCjG9DtNlClVuFLEZdDNbEs=
+golang.org/x/sys v0.0.0-20210616094352-59db8d763f22/go.mod h1:oPkhp1MJrh7nUepCBck5+mAzfO9JrbApNNgaTdGDITg=
+golang.org/x/sys v0.1.0/go.mod h1:oPkhp1MJrh7nUepCBck5+mAzfO9JrbApNNgaTdGDITg=
+golang.org/x/sys v0.47.0 h1:o7XGOvZQCADBQQ4Y7VNq2dRWQR7JmOUW8Kxx4ZsNgWs=
+golang.org/x/sys v0.47.0/go.mod h1:4GL1E5IUh+htKOUEOaiffhrAeqysfVGipDYzABqnCmw=
+golang.org/x/term v0.45.0 h1:NwWyBmoJCbfTHpxrWoZ9C6/VxOf7ic219I8xZZFdrf0=
+golang.org/x/term v0.45.0/go.mod h1:9aqxs0blBcrm/n0L9QW0aRVD+ktan8ssZromtqJC43w=
+golang.org/x/text v0.40.0 h1:Ub2Z6/xjgF1WrYQz2nuITOEegKFtiIy+rieRJ5lHZKs=
+golang.org/x/text v0.40.0/go.mod h1:hpnzDAfGV753zIKo+wk3u1bVKCGPbrnF7+7LBF/UHVY=
+gonum.org/v1/gonum v0.17.0 h1:VbpOemQlsSMrYmn7T2OUvQ4dqxQXU+ouZFQsZOx50z4=
+gonum.org/v1/gonum v0.17.0/go.mod h1:El3tOrEuMpv2UdMrbNlKEh9vd86bmQ6vqIcDwxEOc1E=
+google.golang.org/genproto/googleapis/rpc v0.0.0-20260706201446-f0a921348800 h1:qEHAMpSaUhtD0p3NbEEI83HwNGFxEwaSJ1G9PLnCBZE=
+google.golang.org/genproto/googleapis/rpc v0.0.0-20260706201446-f0a921348800/go.mod h1:4Hqkh8ycfw05ld/3BWL7rJOSfebL2Q+DVDeRgYgxUU8=
+google.golang.org/grpc v1.84.0 h1:soMyaPJ8pAak5PIQ0DGBUir0XRo2fRoMqhNWMLlLxO0=
+google.golang.org/grpc v1.84.0/go.mod h1:ljCht0DrxQrXBDRTZp52Qxh3Ffk8CdYm2sj4O2QN2C0=
+google.golang.org/protobuf v1.36.12 h1:pJOKDDOyeXErUroCihFAd5LQuwXBSpVnKGrj5o/fwxc=
+google.golang.org/protobuf v1.36.12/go.mod h1:HTf+CrKn2C3g5S8VImy6tdcUvCska2kB7j23XfzDpco=
+gopkg.in/check.v1 v1.0.0-20201130134442-10cb98267c6c h1:Hei/4ADfdWqJk1ZMxUNpqntNwaWcugrBjAiHlqqRiVk=
+gopkg.in/check.v1 v1.0.0-20201130134442-10cb98267c6c/go.mod h1:JHkPIbrfpd72SG/EVd6muEfDQjcINNoR0C8j2r3qZ4Q=
+gotest.tools/v3 v3.5.2 h1:7koQfIKdy+I8UTetycgUqXWSDwpgv193Ka+qRsmBY8Q=
+gotest.tools/v3 v3.5.2/go.mod h1:LtdLGcnqToBH83WByAAi/wiwSFCArdFIUV/xxN4pcjA=
+pgregory.net/rapid v1.2.0 h1:keKAYRcjm+e1F0oAuU5F5+YPAWcyxNNRK2wud503Gnk=
+pgregory.net/rapid v1.2.0/go.mod h1:PY5XlDGj0+V1FCq0o192FdRhpKHGTRIWBgqjDBTrq04=
+
+
+===== FILE: internal/identity/app/service.go =====
+
+package app
+
+import (
+	"context"
+	"fmt"
+	"uuid"
+
+	"github.com/distributed-programming-2026/go-sdk/pkg/uow"
+
+	"identity/internal/identity/domain"
+	"identity/internal/identity/infra/mysql"
+)
+
+type Service struct {
+	unit uow.UnitOfWorkWithRepositoryProvider[*mysql.RepositoryProvider]
+}
+
+func NewService(unit uow.UnitOfWorkWithRepositoryProvider[*mysql.RepositoryProvider]) *Service {
+	return &Service{unit: unit}
+}
+
+func (s *Service) Create(
+	ctx context.Context,
+	firstName,
+	lastName string,
+	middleName *string,
+	loginSnapshot,
+	email string,
+) (uuid.UUID, error) {
+	var userID uuid.UUID
+
+	err := s.unit.ExecuteWithRepositoryProvider(ctx, func(provider *mysql.RepositoryProvider) error {
+		svc := domain.NewIdentityService(provider.Identity(ctx))
+
+		var err error
+		userID, err = svc.Create(firstName, lastName, middleName, loginSnapshot, email)
+		return err
+	})
+	if err != nil {
+		return uuid.Nil(), fmt.Errorf("identity: create user: %w", err)
+	}
+
+	return userID, nil
+}
+
+func (s *Service) FindByLoginSnapshot(ctx context.Context, loginSnapshot string) (uuid.UUID, error) {
+	var userID uuid.UUID
+
+	err := s.unit.ExecuteWithRepositoryProvider(ctx, func(provider *mysql.RepositoryProvider) error {
+		svc := domain.NewIdentityService(provider.Identity(ctx))
+
+		user, err := svc.FindByLoginSnapshot(loginSnapshot)
+		if err != nil {
+			return err
+		}
+
+		userID = user.Data().ID
+		return nil
+	})
+	if err != nil {
+		return uuid.Nil(), fmt.Errorf("identity: find user by login: %w", err)
+	}
+
+	return userID, nil
+}
+
+func (s *Service) FindByID(ctx context.Context, userID uuid.UUID) (*domain.User, error) {
+	var user *domain.User
+
+	err := s.unit.ExecuteWithRepositoryProvider(ctx, func(provider *mysql.RepositoryProvider) error {
+		var err error
+		user, err = domain.NewIdentityService(provider.Identity(ctx)).FindByID(userID)
+		return err
+	})
+	if err != nil {
+		return nil, fmt.Errorf("identity: find user by ID: %w", err)
+	}
+
+	return user, nil
+}
+
+func (s *Service) Update(
+	ctx context.Context,
+	userID uuid.UUID,
+	firstName,
+	lastName string,
+	middleName *string,
+	email string,
+) (*domain.User, error) {
+	var user *domain.User
+
+	err := s.unit.ExecuteWithRepositoryProvider(ctx, func(provider *mysql.RepositoryProvider) error {
+		var err error
+		user, err = domain.NewIdentityService(provider.Identity(ctx)).Update(
+			userID,
+			firstName,
+			lastName,
+			middleName,
+			email,
+		)
+		return err
+	})
+	if err != nil {
+		return nil, fmt.Errorf("identity: update user: %w", err)
+	}
+
+	return user, nil
+}
+
+
+===== FILE: internal/identity/config/config.go =====
+
+package config
+
+import (
+	"errors"
+	"time"
+)
+
+type Env struct {
+	App   App   `envconfig:"app"`
+	GRPC  GRPC  `envconfig:"grpc"`
+	HTTP  HTTP  `envconfig:"http"`
+	MySQL MySQL `envconfig:"mysql"`
+	AMQP  AMQP  `envconfig:"amqp"`
+	Relay Relay `envconfig:"relay"`
+}
+
+type App struct {
+	Debug        bool          `envconfig:"debug"`
+	GraceTimeout time.Duration `envconfig:"grace_timeout" default:"30s"`
+}
+
+type GRPC struct {
+	Address string `envconfig:"address" default:":8081"`
+}
+
+type HTTP struct {
+	Address string `envconfig:"address" default:":8082"`
+}
+
+type MySQL struct {
+	Address               string        `envconfig:"address" default:"localhost:3306"`
+	Database              string        `envconfig:"database" default:"identity"`
+	User                  string        `envconfig:"user" default:"identity"`
+	Password              string        `envconfig:"password" default:"identity"`
+	MaxConnections        int           `envconfig:"max_connections" default:"10"`
+	ConnectionMaxLifeTime time.Duration `envconfig:"connection_max_lifetime" default:"30m"`
+	ConnectionMaxIdleTime time.Duration `envconfig:"connection_max_idle_time" default:"5m"`
+	ConnectTimeout        time.Duration `envconfig:"connect_timeout" default:"5s"`
+	ReadTimeout           time.Duration `envconfig:"read_timeout" default:"10s"`
+	WriteTimeout          time.Duration `envconfig:"write_timeout" default:"10s"`
+}
+
+type AMQP struct {
+	URL            string        `envconfig:"url" default:"amqp://local:local@localhost:5672/"`
+	Queue          string        `envconfig:"queue" default:"identity.echo"`
+	ConnectTimeout time.Duration `envconfig:"connect_timeout" default:"5s"`
+	PrefetchCount  int           `envconfig:"prefetch_count" default:"10"`
+}
+
+type Relay struct {
+	Interval       time.Duration `envconfig:"interval" default:"1s"`
+	BatchSize      int           `envconfig:"batch_size" default:"100"`
+	PublishTimeout time.Duration `envconfig:"publish_timeout" default:"10s"`
+	LockTimeout    time.Duration `envconfig:"lock_timeout" default:"1s"`
+}
+
+func (c Env) Validate() error {
+	if c.App.GraceTimeout <= 0 || c.AMQP.ConnectTimeout <= 0 || c.Relay.Interval <= 0 || c.Relay.PublishTimeout <= 0 || c.Relay.LockTimeout < 0 {
+		return errors.New("timeouts and relay interval must be positive; lock timeout must not be negative")
+	}
+	if c.MySQL.ConnectTimeout <= 0 || c.MySQL.ReadTimeout <= 0 || c.MySQL.WriteTimeout <= 0 || c.MySQL.ConnectionMaxLifeTime < 0 || c.MySQL.ConnectionMaxIdleTime < 0 {
+		return errors.New("MySQL timeouts must be positive; connection lifetimes must not be negative")
+	}
+	if c.MySQL.MaxConnections <= 0 || c.AMQP.PrefetchCount <= 0 || c.Relay.BatchSize <= 0 {
+		return errors.New("connection, prefetch and batch counts must be positive")
+	}
+	if c.MySQL.Address == "" || c.MySQL.Database == "" || c.MySQL.User == "" || c.AMQP.URL == "" || c.AMQP.Queue == "" || c.HTTP.Address == "" || c.GRPC.Address == "" {
+		return errors.New("database, broker and server configuration must not be empty")
+	}
+	return nil
+}
+
+
+===== FILE: internal/identity/domain/model.go =====
+
+package domain
+
+import (
+	"errors"
+	"net/mail"
+	"strings"
+	"uuid"
+)
+
+var (
+	ErrInvalidUserID    = errors.New("invalid user ID")
+	ErrInvalidEmail     = errors.New("invalid email")
+	ErrInvalidFirstName = errors.New("invalid first name")
+	ErrInvalidLastName  = errors.New("invalid last name")
+	ErrInvalidLogin     = errors.New("invalid login")
+)
+
+type Email string
+
+func NewEmail(raw string) (Email, error) {
+	value := strings.TrimSpace(raw)
+
+	addr, err := mail.ParseAddress(value)
+	if err != nil || addr.Address != value {
+		return "", ErrInvalidEmail
+	}
+
+	return Email(value), nil
+}
+
+func (e Email) String() string {
+	return string(e)
+}
+
+type User struct {
+	id            uuid.UUID
+	firstName     string
+	lastName      string
+	middleName    *string
+	loginSnapshot string
+	email         Email
+}
+
+func NewUser(
+	id uuid.UUID,
+	firstName string,
+	lastName string,
+	middleName *string,
+	loginSnapshot string,
+	email Email,
+) (*User, error) {
+	firstName = strings.TrimSpace(firstName)
+	lastName = strings.TrimSpace(lastName)
+	middleName = optionalString(middleName)
+	loginSnapshot = strings.TrimSpace(loginSnapshot)
+
+	if id == uuid.Nil() {
+		return nil, ErrInvalidUserID
+	}
+	if firstName == "" {
+		return nil, ErrInvalidFirstName
+	}
+	if lastName == "" {
+		return nil, ErrInvalidLastName
+	}
+	if loginSnapshot == "" {
+		return nil, ErrInvalidLogin
+	}
+	validatedEmail, err := NewEmail(string(email))
+	if err != nil {
+		return nil, err
+	}
+
+	return &User{
+		id:            id,
+		firstName:     firstName,
+		lastName:      lastName,
+		middleName:    middleName,
+		loginSnapshot: loginSnapshot,
+		email:         validatedEmail,
+	}, nil
+}
+
+type UserData struct {
+	ID            uuid.UUID
+	FirstName     string
+	LastName      string
+	MiddleName    *string
+	LoginSnapshot string
+	Email         Email
+}
+
+func optionalString(value *string) *string {
+	if value == nil {
+		return nil
+	}
+	trimmed := strings.TrimSpace(*value)
+	if trimmed == "" {
+		return nil
+	}
+	return &trimmed
+}
+
+func (u *User) Data() *UserData {
+	return &UserData{
+		ID:            u.id,
+		FirstName:     u.firstName,
+		LastName:      u.lastName,
+		MiddleName:    u.middleName,
+		LoginSnapshot: u.loginSnapshot,
+		Email:         u.email,
+	}
+}
+
+type IdentityRepository interface {
+	NextID() (uuid.UUID, error)
+	Store(*User) error
+	FindByLoginSnapshot(string) (*User, error)
+	FindByID(uuid.UUID) (*User, error)
+	Update(*User) error
+}
+
+
+===== FILE: internal/identity/domain/model_test.go =====
+
+package domain
+
+import (
+	"testing"
+	"uuid"
+
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+)
+
+func TestNewEmail(t *testing.T) {
+	tests := []struct {
+		name    string
+		input   string
+		want    Email
+		wantErr error
+	}{
+		{
+			name:  "valid email",
+			input: "alex@example.com",
+			want:  Email("alex@example.com"),
+		},
+		{
+			name:  "trim spaces",
+			input: "  alex@example.com  ",
+			want:  Email("alex@example.com"),
+		},
+		{
+			name:    "empty email",
+			input:   "",
+			wantErr: ErrInvalidEmail,
+		},
+		{
+			name:    "only spaces",
+			input:   testWhitespace,
+			wantErr: ErrInvalidEmail,
+		},
+		{
+			name:    "invalid format",
+			input:   "invalid-email",
+			wantErr: ErrInvalidEmail,
+		},
+		{
+			name:    "display name not allowed",
+			input:   "Alex <alex@example.com>",
+			wantErr: ErrInvalidEmail,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := NewEmail(tt.input)
+
+			require.ErrorIs(t, err, tt.wantErr)
+
+			if err != nil {
+				assert.Empty(t, got)
+				return
+			}
+
+			assert.Equal(t, tt.want, got)
+
+			assert.Equal(t, string(tt.want), got.String())
+		})
+	}
+}
+
+func TestNewUserValidatesRequiredFields(t *testing.T) {
+	tests := []struct {
+		name      string
+		id        uuid.UUID
+		firstName string
+		lastName  string
+		login     string
+		email     string
+		wantErr   error
+	}{
+		{
+			name:      "valid user",
+			id:        uuid.New(),
+			firstName: " Ada ",
+			lastName:  " Lovelace ",
+			login:     " ada ",
+			email:     "ada@example.com",
+		},
+		{
+			name:      "missing ID",
+			firstName: testFirstName,
+			lastName:  testLastName,
+			login:     testLogin,
+			email:     testEmail,
+			wantErr:   ErrInvalidUserID,
+		},
+		{
+			name:     "missing first name",
+			id:       uuid.New(),
+			lastName: testLastName,
+			login:    testLogin,
+			email:    testEmail,
+			wantErr:  ErrInvalidFirstName,
+		},
+		{
+			name:      "missing last name",
+			id:        uuid.New(),
+			firstName: testFirstName,
+			login:     testLogin,
+			email:     testEmail,
+			wantErr:   ErrInvalidLastName,
+		},
+		{
+			name:      "missing login",
+			id:        uuid.New(),
+			firstName: testFirstName,
+			lastName:  testLastName,
+			email:     testEmail,
+			wantErr:   ErrInvalidLogin,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			user, err := NewUser(
+				tt.id,
+				tt.firstName,
+				tt.lastName,
+				nil,
+				tt.login,
+				Email(tt.email),
+			)
+			require.ErrorIs(t, err, tt.wantErr)
+			if tt.wantErr == nil {
+				require.NotNil(t, user)
+				require.Equal(t, testFirstName, user.Data().FirstName)
+				require.Equal(t, testLogin, user.Data().LoginSnapshot)
+			}
+		})
+	}
+}
+
+
+===== FILE: internal/identity/domain/service.go =====
+
+package domain
+
+import (
+	"errors"
+	"fmt"
+	"strings"
+	"uuid"
+)
+
+var (
+	ErrLoginAlreadyExists = errors.New("login already exists")
+	ErrUserNotFound       = errors.New("user not found")
+)
+
+type IdentityService struct {
+	repo IdentityRepository
+}
+
+func NewIdentityService(repo IdentityRepository) *IdentityService {
+	return &IdentityService{
+		repo: repo,
+	}
+}
+
+func (s *IdentityService) Create(
+	firstName string,
+	lastName string,
+	middleName *string,
+	loginSnapshot string,
+	email string,
+) (uuid.UUID, error) {
+	loginSnapshot = strings.TrimSpace(loginSnapshot)
+	if loginSnapshot == "" {
+		return uuid.Nil(), fmt.Errorf("create user: %w", ErrInvalidLogin)
+	}
+	id, err := s.repo.NextID()
+	if err != nil {
+		return uuid.Nil(), err
+	}
+
+	verifiedEmail, err := NewEmail(email)
+	if err != nil {
+		return uuid.Nil(), fmt.Errorf("create user: %w", err)
+	}
+
+	user, err := NewUser(
+		id,
+		firstName,
+		lastName,
+		middleName,
+		loginSnapshot,
+		verifiedEmail,
+	)
+	if err != nil {
+		return uuid.Nil(), fmt.Errorf("create user: new user: %w", err)
+	}
+	err = s.repo.Store(user)
+	if err != nil {
+		return uuid.Nil(), fmt.Errorf("create user: store: %w", err)
+	}
+
+	return id, nil
+}
+
+func (s *IdentityService) FindByLoginSnapshot(loginSnapshot string) (*User, error) {
+	loginSnapshot = strings.TrimSpace(loginSnapshot)
+	if loginSnapshot == "" {
+		return nil, fmt.Errorf("find user by login: %w", ErrInvalidLogin)
+	}
+
+	user, err := s.repo.FindByLoginSnapshot(loginSnapshot)
+	if err != nil {
+		return nil, fmt.Errorf("find user by login: %w", err)
+	}
+	if user == nil {
+		return nil, fmt.Errorf("find user by login: %w", ErrUserNotFound)
+	}
+
+	return user, nil
+}
+
+func (s *IdentityService) FindByID(userID uuid.UUID) (*User, error) {
+	if userID == uuid.Nil() {
+		return nil, ErrInvalidUserID
+	}
+
+	user, err := s.repo.FindByID(userID)
+	if err != nil {
+		return nil, fmt.Errorf("find user by ID: %w", err)
+	}
+	if user == nil {
+		return nil, fmt.Errorf("find user by ID: %w", ErrUserNotFound)
+	}
+
+	return user, nil
+}
+
+func (s *IdentityService) Update(
+	userID uuid.UUID,
+	firstName,
+	lastName string,
+	middleName *string,
+	email string,
+) (*User, error) {
+	current, err := s.FindByID(userID)
+	if err != nil {
+		return nil, fmt.Errorf("update user: %w", err)
+	}
+
+	updated, err := NewUser(
+		userID,
+		firstName,
+		lastName,
+		middleName,
+		current.Data().LoginSnapshot,
+		Email(email),
+	)
+	if err != nil {
+		return nil, fmt.Errorf("update user: %w", err)
+	}
+	if err := s.repo.Update(updated); err != nil {
+		return nil, fmt.Errorf("update user: %w", err)
+	}
+
+	return updated, nil
+}
+
+
+===== FILE: internal/identity/domain/service_test.go =====
+
+package domain
+
+import (
+	"errors"
+	"testing"
+	"uuid"
+
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+)
+
+type fakeIdentityRepository struct {
+	nextID       uuid.UUID
+	nextIDErr    error
+	existingUser *User
+	findErr      error
+	findByIDErr  error
+	storeErr     error
+	updateErr    error
+
+	storedUser  *User
+	updatedUser *User
+	foundLogin  string
+	foundID     uuid.UUID
+
+	nextIDCalls   int
+	findCalls     int
+	storeCalls    int
+	findByIDCalls int
+	updateCalls   int
+}
+
+func (f *fakeIdentityRepository) NextID() (uuid.UUID, error) {
+	f.nextIDCalls++
+	return f.nextID, f.nextIDErr
+}
+
+func (f *fakeIdentityRepository) Store(user *User) error {
+	f.storeCalls++
+	f.storedUser = user
+	return f.storeErr
+}
+
+func (f *fakeIdentityRepository) FindByLoginSnapshot(login string) (*User, error) {
+	f.findCalls++
+	f.foundLogin = login
+	return f.existingUser, f.findErr
+}
+
+func (f *fakeIdentityRepository) FindByID(userID uuid.UUID) (*User, error) {
+	f.findByIDCalls++
+	f.foundID = userID
+	return f.existingUser, f.findByIDErr
+}
+
+func (f *fakeIdentityRepository) Update(user *User) error {
+	f.updateCalls++
+	f.updatedUser = user
+	return f.updateErr
+}
+
+var _ IdentityRepository = (*fakeIdentityRepository)(nil)
+
+func TestIdentityService_Create(t *testing.T) {
+	expectedID := uuid.New()
+
+	repo := &fakeIdentityRepository{
+		nextID: expectedID,
+	}
+	service := NewIdentityService(repo)
+
+	id, err := service.Create(
+		"  Alex  ",
+		"  Smith  ",
+		stringPointer("  James  "),
+		"  alex  ",
+		"  alex@example.com  ",
+	)
+
+	require.NoError(t, err)
+	assert.Equal(t, expectedID, id)
+	assert.Zero(t, repo.findCalls, "identity must not check login uniqueness")
+	assert.Equal(t, 1, repo.nextIDCalls, "NextID calls")
+	assert.Equal(t, 1, repo.storeCalls, "Store calls")
+	assert.Empty(t, repo.foundLogin)
+	require.NotNil(t, repo.storedUser)
+
+	user := repo.storedUser
+	assert.Equal(t, expectedID, user.id)
+	assert.Equal(t, "Alex", user.firstName)
+	assert.Equal(t, "Smith", user.lastName)
+	require.NotNil(t, user.middleName)
+	assert.Equal(t, "James", *user.middleName)
+	assert.Equal(t, testAlexLogin, user.loginSnapshot)
+	assert.Equal(t, Email("alex@example.com"), user.email)
+}
+
+type createInput struct {
+	firstName  string
+	lastName   string
+	middleName *string
+	login      string
+	email      string
+}
+
+func validCreateInput() createInput {
+	return createInput{
+		firstName:  "Alex",
+		lastName:   "Smith",
+		middleName: nil,
+		login:      testAlexLogin,
+		email:      "alex@example.com",
+	}
+}
+
+func TestIdentityService_Create_Errors(t *testing.T) {
+	nextIDErr := errors.New("next ID failed")
+	storeErr := errors.New("store failed")
+
+	tests := []struct {
+		name        string
+		modifyInput func(*createInput)
+		modifyRepo  func(*fakeIdentityRepository)
+		wantErr     error
+		wantFind    int
+		wantNextID  int
+		wantStore   int
+	}{
+		{
+			name: "empty login",
+			modifyInput: func(i *createInput) {
+				i.login = ""
+			},
+			wantErr: ErrInvalidLogin,
+		},
+		{
+			name: "whitespace login",
+			modifyInput: func(i *createInput) {
+				i.login = testWhitespace
+			},
+			wantErr: ErrInvalidLogin,
+		},
+		{
+			name: "next ID error",
+			modifyRepo: func(r *fakeIdentityRepository) {
+				r.nextIDErr = nextIDErr
+			},
+			wantErr:    nextIDErr,
+			wantNextID: 1,
+		},
+		{
+			name: "invalid email",
+			modifyInput: func(i *createInput) {
+				i.email = "invalid-email"
+			},
+			wantErr:    ErrInvalidEmail,
+			wantNextID: 1,
+		},
+		{
+			name: "empty first name",
+			modifyInput: func(i *createInput) {
+				i.firstName = ""
+			},
+			wantErr:    ErrInvalidFirstName,
+			wantNextID: 1,
+		},
+		{
+			name: "empty last name",
+			modifyInput: func(i *createInput) {
+				i.lastName = testWhitespace
+			},
+			wantErr:    ErrInvalidLastName,
+			wantNextID: 1,
+		},
+		{
+			name: "store error",
+			modifyRepo: func(r *fakeIdentityRepository) {
+				r.storeErr = storeErr
+			},
+			wantErr:    storeErr,
+			wantNextID: 1,
+			wantStore:  1,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			input := validCreateInput()
+
+			repo := &fakeIdentityRepository{
+				nextID: uuid.New(),
+			}
+
+			if tt.modifyInput != nil {
+				tt.modifyInput(&input)
+			}
+
+			if tt.modifyRepo != nil {
+				tt.modifyRepo(repo)
+			}
+
+			service := NewIdentityService(repo)
+
+			id, err := service.Create(
+				input.firstName,
+				input.lastName,
+				input.middleName,
+				input.login,
+				input.email,
+			)
+
+			require.ErrorIs(t, err, tt.wantErr)
+
+			assert.Equal(t, uuid.Nil(), id)
+
+			assert.Equal(t, tt.wantFind, repo.findCalls)
+
+			assert.Equal(t, tt.wantNextID, repo.nextIDCalls)
+
+			assert.Equal(t, tt.wantStore, repo.storeCalls)
+		})
+	}
+}
+
+func TestIdentityService_FindByLogin(t *testing.T) {
+	existingUser := &User{loginSnapshot: testAlexLogin}
+	findErr := errors.New("find failed")
+
+	tests := []struct {
+		name      string
+		login     string
+		foundUser *User
+		repoErr   error
+		wantErr   error
+		wantLogin string
+		wantCalls int
+	}{
+		{
+			name:      "user found",
+			login:     "  alex  ",
+			foundUser: existingUser,
+			wantLogin: testAlexLogin,
+			wantCalls: 1,
+		},
+		{
+			name:    "empty login",
+			login:   "",
+			wantErr: ErrInvalidLogin,
+		},
+		{
+			name:    "whitespace login",
+			login:   testWhitespace,
+			wantErr: ErrInvalidLogin,
+		},
+		{
+			name:      "user not found",
+			login:     "unknown",
+			wantErr:   ErrUserNotFound,
+			wantLogin: "unknown",
+			wantCalls: 1,
+		},
+		{
+			name:      "repository error",
+			login:     testAlexLogin,
+			repoErr:   findErr,
+			wantErr:   findErr,
+			wantLogin: testAlexLogin,
+			wantCalls: 1,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			repo := &fakeIdentityRepository{
+				existingUser: tt.foundUser,
+				findErr:      tt.repoErr,
+			}
+			service := NewIdentityService(repo)
+
+			user, err := service.FindByLoginSnapshot(tt.login)
+
+			require.ErrorIs(t, err, tt.wantErr)
+
+			if tt.wantErr != nil {
+				assert.Nil(t, user)
+			} else {
+				assert.Same(t, tt.foundUser, user)
+			}
+
+			assert.Equal(t, tt.wantCalls, repo.findCalls)
+
+			assert.Equal(t, tt.wantLogin, repo.foundLogin)
+		})
+	}
+}
+
+func TestIdentityService_Update(t *testing.T) {
+	const (
+		updatedFirstName = "Ann"
+		updatedLastName  = "Jones"
+		updatedEmail     = "ann@example.com"
+	)
+
+	userID := uuid.New()
+	current, err := NewUser(userID, "Alex", "Smith", nil, testAlexLogin, Email("alex@example.com"))
+	require.NoError(t, err)
+
+	tests := []struct {
+		name    string
+		first   string
+		last    string
+		middle  *string
+		email   string
+		found   *User
+		wantErr error
+	}{
+		{name: "updates profile", first: updatedFirstName, last: updatedLastName, middle: stringPointer("Lee"), email: updatedEmail, found: current},
+		{name: "missing user", first: updatedFirstName, last: updatedLastName, email: updatedEmail, wantErr: ErrUserNotFound},
+		{name: "empty first name", first: "", last: updatedLastName, email: updatedEmail, found: current, wantErr: ErrInvalidFirstName},
+		{name: "invalid email", first: updatedFirstName, last: updatedLastName, email: "invalid", found: current, wantErr: ErrInvalidEmail},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			repo := &fakeIdentityRepository{existingUser: tt.found}
+			_, err := NewIdentityService(repo).Update(userID, tt.first, tt.last, tt.middle, tt.email)
+			require.ErrorIs(t, err, tt.wantErr)
+			if tt.wantErr == nil {
+				require.NotNil(t, repo.updatedUser)
+				require.Equal(t, testAlexLogin, repo.updatedUser.loginSnapshot)
+				if tt.middle == nil {
+					require.Nil(t, repo.updatedUser.middleName)
+				} else {
+					require.NotNil(t, repo.updatedUser.middleName)
+					require.Equal(t, *tt.middle, *repo.updatedUser.middleName)
+				}
+			}
+		})
+	}
+}
+
+func stringPointer(value string) *string {
+	return &value
+}
+
+
+===== FILE: internal/identity/domain/testdata_test.go =====
+
+package domain
+
+const (
+	testWhitespace = "   "
+	testFirstName  = "Ada"
+	testLastName   = "Lovelace"
+	testLogin      = "ada"
+	testEmail      = "ada@example.com"
+	testAlexLogin  = "alex"
+)
+
+
+===== FILE: internal/identity/infra/event/dispatcherfactory.go =====
+
+package event
+
+import (
+	"context"
+
+	"github.com/distributed-programming-2026/go-sdk/pkg/event"
+
+	domainevent "github.com/distributed-programming-2026/lib/event"
+)
+
+func NewDispatcherFactory(producer string, dispatcher event.Dispatcher) *DispatcherFactory {
+	return &DispatcherFactory{
+		producer:   producer,
+		dispatcher: dispatcher,
+	}
+}
+
+type DispatcherFactory struct {
+	producer   string
+	dispatcher event.Dispatcher
+}
+
+func (f *DispatcherFactory) NewDispatcher(ctx context.Context) domainevent.Dispatcher {
+	return domainevent.NewDispatcherProxy(ctx, f.producer, f.dispatcher)
+}
+
+
+===== FILE: internal/identity/infra/handlers/events/handler.go =====
+
+package events
+
+import (
+	"context"
+	"fmt"
+	"log/slog"
+
+	identityevents "identity/api/events"
+
+	"github.com/distributed-programming-2026/go-sdk/pkg/event"
+)
+
+type handler struct {
+	logger *slog.Logger
+}
+
+func NewHandler(logger *slog.Logger) event.Handler {
+	return &handler{
+		logger: logger,
+	}
+}
+
+func (h *handler) Handle(ctx context.Context, envelope event.Envelope) error {
+	if envelope.Type() != "Echo" {
+		return fmt.Errorf("unsupported event type %q", envelope.Type())
+	}
+	var echo identityevents.Echo
+	err := envelope.UnmarshalPayload(&echo)
+	if err != nil {
+		return err
+	}
+	h.logger.InfoContext(ctx, "echo received", slog.String("echo_id", echo.ID), slog.String("body", echo.Body))
+	return nil
+}
+
+
+===== FILE: internal/identity/infra/handlers/httpapi/handler.go =====
+
+package httpapi
+
+import (
+	"context"
+	"errors"
+	"fmt"
+	"net/http"
+	"uuid"
+
+	publicapi "identity/api/server/publicapi"
+	"identity/internal/identity/app"
+	"identity/internal/identity/domain"
+
+	googleuuid "github.com/google/uuid"
+	openapi_types "github.com/oapi-codegen/runtime/types"
+)
+
+const authUserHeader = "X-Auth-User"
+
+type userIDKey struct{}
+
+type handler struct {
+	svc *app.Service
+}
+
+func NewHandler(svc *app.Service) publicapi.StrictServerInterface {
+	return &handler{svc: svc}
+}
+
+func (h *handler) GetCurrentIdentity(
+	ctx context.Context,
+	_ publicapi.GetCurrentIdentityRequestObject,
+) (publicapi.GetCurrentIdentityResponseObject, error) {
+	userID, ok := userIDFromContext(ctx)
+	if !ok {
+		return publicapi.GetCurrentIdentity401Response{}, nil
+	}
+
+	user, err := h.svc.FindByID(ctx, userID)
+	if err != nil {
+		if errors.Is(err, domain.ErrUserNotFound) {
+			return publicapi.GetCurrentIdentity404Response{}, nil
+		}
+		return nil, err
+	}
+
+	response, err := identityResponse(user)
+	if err != nil {
+		return nil, err
+	}
+	return publicapi.GetCurrentIdentity200JSONResponse(response), nil
+}
+
+func (h *handler) UpdateCurrentIdentity(
+	ctx context.Context,
+	req publicapi.UpdateCurrentIdentityRequestObject,
+) (publicapi.UpdateCurrentIdentityResponseObject, error) {
+	userID, ok := userIDFromContext(ctx)
+	if !ok {
+		return publicapi.UpdateCurrentIdentity401Response{}, nil
+	}
+	if req.Body == nil {
+		return publicapi.UpdateCurrentIdentity400Response{}, nil
+	}
+
+	user, err := h.svc.Update(
+		ctx,
+		userID,
+		req.Body.FirstName,
+		req.Body.LastName,
+		req.Body.MiddleName,
+		string(req.Body.Email),
+	)
+	if err != nil {
+		switch {
+		case errors.Is(err, domain.ErrUserNotFound):
+			return publicapi.UpdateCurrentIdentity404Response{}, nil
+		case errors.Is(err, domain.ErrInvalidFirstName),
+			errors.Is(err, domain.ErrInvalidLastName),
+			errors.Is(err, domain.ErrInvalidEmail):
+			return publicapi.UpdateCurrentIdentity400Response{}, nil
+		default:
+			return nil, err
+		}
+	}
+
+	response, err := identityResponse(user)
+	if err != nil {
+		return nil, err
+	}
+	return publicapi.UpdateCurrentIdentity200JSONResponse(response), nil
+}
+
+func withAuthenticatedUser(next publicapi.StrictHandlerFunc, operationID string) publicapi.StrictHandlerFunc {
+	return func(ctx context.Context, w http.ResponseWriter, r *http.Request, request any) (any, error) {
+		userID, err := uuid.Parse(r.Header.Get(authUserHeader))
+		if err != nil || userID == uuid.Nil() {
+			switch operationID {
+			case "updateCurrentIdentity":
+				return publicapi.UpdateCurrentIdentity401Response{}, nil
+			case "getCurrentIdentity":
+				return publicapi.GetCurrentIdentity401Response{}, nil
+			default:
+				return nil, fmt.Errorf("unknown protected operation: %s", operationID)
+			}
+		}
+
+		return next(context.WithValue(ctx, userIDKey{}, userID), w, r, request)
+	}
+}
+
+func userIDFromContext(ctx context.Context) (uuid.UUID, bool) {
+	userID, ok := ctx.Value(userIDKey{}).(uuid.UUID)
+	return userID, ok && userID != uuid.Nil()
+}
+
+func identityResponse(user *domain.User) (publicapi.Identity, error) {
+	data := user.Data()
+	userID, err := googleuuid.Parse(data.ID.String())
+	if err != nil {
+		return publicapi.Identity{}, fmt.Errorf("identity response: parse user ID: %w", err)
+	}
+
+	return publicapi.Identity{
+		UserId:     userID,
+		Login:      data.LoginSnapshot,
+		FirstName:  data.FirstName,
+		LastName:   data.LastName,
+		MiddleName: data.MiddleName,
+		Email:      openapi_types.Email(data.Email.String()),
+	}, nil
+}
+
+
+===== FILE: internal/identity/infra/handlers/httpapi/register.go =====
+
+package httpapi
+
+import (
+	"log/slog"
+	"net/http"
+
+	publicapi "identity/api/server/publicapi"
+	"identity/internal/identity/app"
+
+	"github.com/distributed-programming-2026/go-sdk/pkg/logging"
+	"github.com/go-chi/chi/v5"
+
+	runtimehttp "github.com/distributed-programming-2026/lib/runtime/http"
+)
+
+func Register(svc *app.Service, logger *slog.Logger) (runtimehttp.RegisterFunc, error) {
+	return func(router chi.Router) error {
+		strict := publicapi.NewStrictHandlerWithOptions(
+			NewHandler(svc),
+			[]publicapi.StrictMiddlewareFunc{withAuthenticatedUser},
+			publicapi.StrictHTTPServerOptions{
+				ResponseErrorHandlerFunc: func(w http.ResponseWriter, r *http.Request, err error) {
+					logger.ErrorContext(r.Context(), "identity HTTP request failed", logging.Error(err))
+					http.Error(w, "internal server error", http.StatusInternalServerError)
+				},
+			},
+		)
+
+		publicapi.HandlerFromMux(strict, router)
+		return nil
+	}, nil
+}
+
+
+===== FILE: internal/identity/infra/handlers/internalapi/handler.go =====
+
+package internalapi
+
+import (
+	"context"
+	"errors"
+	"log/slog"
+
+	"github.com/distributed-programming-2026/go-sdk/pkg/logging"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
+
+	identityinternalapi "identity/api/server/internalapi"
+	"identity/internal/identity/app"
+	"identity/internal/identity/domain"
+)
+
+func NewHandler(svc *app.Service, logger *slog.Logger) identityinternalapi.IdentityServiceServer {
+	return &handler{
+		svc:    svc,
+		logger: logger,
+	}
+}
+
+type handler struct {
+	svc    *app.Service
+	logger *slog.Logger
+	identityinternalapi.UnimplementedIdentityServiceServer
+}
+
+func (h handler) CreateUser(
+	ctx context.Context,
+	req *identityinternalapi.CreateUserRequest,
+) (*identityinternalapi.CreateUserResponse, error) {
+	userID, err := h.svc.Create(
+		ctx,
+		req.GetFirstName(),
+		req.GetLastName(),
+		req.MiddleName,
+		req.GetLogin(),
+		req.GetEmail(),
+	)
+	if err != nil {
+		switch {
+		case errors.Is(err, domain.ErrLoginAlreadyExists):
+			return nil, status.Error(codes.AlreadyExists, "login already exists")
+		case errors.Is(err, domain.ErrInvalidEmail),
+			errors.Is(err, domain.ErrInvalidFirstName),
+			errors.Is(err, domain.ErrInvalidLastName),
+			errors.Is(err, domain.ErrInvalidLogin):
+			return nil, status.Error(codes.InvalidArgument, "invalid user data")
+		default:
+			h.logger.ErrorContext(ctx, "create user failed", logging.Error(err))
+			return nil, status.Error(codes.Internal, "create user failed")
+		}
+	}
+
+	return &identityinternalapi.CreateUserResponse{
+		UserId: userID.String(),
+	}, nil
+}
+
+func (h handler) FindUserByLogin(
+	ctx context.Context,
+	req *identityinternalapi.FindUserByLoginRequest,
+) (*identityinternalapi.FindUserByLoginResponse, error) {
+	userID, err := h.svc.FindByLoginSnapshot(ctx, req.GetLogin())
+	if err != nil {
+		switch {
+		case errors.Is(err, domain.ErrUserNotFound):
+			return nil, status.Error(codes.NotFound, "user not found")
+		case errors.Is(err, domain.ErrInvalidLogin):
+			return nil, status.Error(codes.InvalidArgument, "invalid login")
+		default:
+			h.logger.ErrorContext(ctx, "find user by login failed", logging.Error(err))
+			return nil, status.Error(codes.Internal, "find user by login failed")
+		}
+	}
+
+	return &identityinternalapi.FindUserByLoginResponse{
+		UserId: userID.String(),
+	}, nil
+}
+
+
+===== FILE: internal/identity/infra/mysql/migrations/factory.go =====
+
+package migrations
+
+import (
+	"github.com/distributed-programming-2026/go-sdk/pkg/migrator"
+	"github.com/distributed-programming-2026/go-sdk/pkg/mysql"
+)
+
+func Database(client mysql.ClientContext) []migrator.Migration {
+	m := make([]migrator.Migration, 0, len(migrations))
+	for _, buildFunc := range migrations {
+		m = append(m, buildFunc(client))
+	}
+	return m
+}
+
+type mysqlMigration func(client mysql.ClientContext) migrator.Migration
+
+var migrations = []mysqlMigration{
+	Version1791225168,
+	Version1792754706,
+}
+
+
+===== FILE: internal/identity/infra/mysql/migrations/version1791225168.go =====
+
+package migrations
+
+import (
+	"context"
+
+	"github.com/distributed-programming-2026/go-sdk/pkg/migrator"
+	"github.com/distributed-programming-2026/go-sdk/pkg/mysql"
+)
+
+func Version1791225168(client mysql.ClientContext) migrator.Migration {
+	return &version1791225168{client: client}
+}
+
+type version1791225168 struct {
+	client mysql.ClientContext
+}
+
+func (v version1791225168) Version() int64 {
+	return 1791225168
+}
+
+func (v version1791225168) Description() string {
+	return "Create users table"
+}
+
+func (v version1791225168) Up(ctx context.Context) error {
+	_, err := v.client.ExecContext(ctx, "create-users-table", `
+CREATE TABLE IF NOT EXISTS users (
+    id CHAR(36) CHARACTER SET ascii NOT NULL PRIMARY KEY,
+    first_name VARCHAR(255) NOT NULL,
+    last_name VARCHAR(255) NOT NULL,
+    middle_name VARCHAR(255) NULL,
+    login_snapshot VARCHAR(255) NOT NULL,
+    email VARCHAR(254) NOT NULL
+) ENGINE=InnoDB CHARACTER SET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+`)
+	return err
+}
+
+
+===== FILE: internal/identity/infra/mysql/migrations/version1792754706.go =====
+
+package migrations
+
+import (
+	"context"
+
+	"github.com/distributed-programming-2026/go-sdk/pkg/migrator"
+	"github.com/distributed-programming-2026/go-sdk/pkg/mysql"
+)
+
+func Version1792754706(client mysql.ClientContext) migrator.Migration {
+	return &version1792754706{client: client}
+}
+
+type version1792754706 struct {
+	client mysql.ClientContext
+}
+
+func (v version1792754706) Version() int64 {
+	return 1792754706
+}
+
+func (v version1792754706) Description() string {
+	return "Make user middle name optional"
+}
+
+func (v version1792754706) Up(ctx context.Context) error {
+	_, err := v.client.ExecContext(ctx, "make-middle-name-optional", `
+ALTER TABLE users MODIFY middle_name VARCHAR(255) NULL;
+`)
+	return err
+}
+
+
+===== FILE: internal/identity/infra/mysql/repository/identity.go =====
+
+package repository
+
+import (
+	"context"
+	"database/sql"
+	"errors"
+	"fmt"
+	"uuid"
+
+	"github.com/distributed-programming-2026/go-sdk/pkg/mysql"
+
+	"identity/internal/identity/domain"
+)
+
+func NewIdentityRepository(ctx context.Context, client mysql.ClientContext) domain.IdentityRepository {
+	return &identityRepository{
+		ctx:    ctx,
+		client: client,
+	}
+}
+
+type identityRepository struct {
+	ctx    context.Context
+	client mysql.ClientContext
+}
+
+func (r *identityRepository) NextID() (uuid.UUID, error) {
+	return uuid.New(), nil
+}
+
+func (r *identityRepository) Store(user *domain.User) error {
+	userData := user.Data()
+	_, err := r.client.ExecContext(r.ctx, "identity.store", `
+INSERT INTO users (id, first_name, last_name, middle_name, login_snapshot, email)
+VALUES (?, ?, ?, ?, ?, ?)
+`,
+		userData.ID.String(),
+		userData.FirstName,
+		userData.LastName,
+		userData.MiddleName,
+		userData.LoginSnapshot,
+		userData.Email.String())
+
+	if err != nil {
+		return fmt.Errorf("store user: %w", err)
+	}
+
+	return nil
+}
+
+func (r *identityRepository) FindByLoginSnapshot(loginSnapshot string) (*domain.User, error) {
+	var id, firstName, lastName, storedLoginSnapshot, email string
+	var middleName sql.NullString
+
+	err := r.client.QueryRowContext(r.ctx, "identity.find_by_login_snapshot", `
+SELECT id, first_name, last_name, middle_name, login_snapshot, email
+FROM users
+WHERE login_snapshot = ?
+`, loginSnapshot).Scan(&id, &firstName, &lastName, &middleName, &storedLoginSnapshot, &email)
+
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("find user by login snapshot: %w", err)
+	}
+
+	userID, err := uuid.Parse(id)
+	if err != nil {
+		return nil, fmt.Errorf("parse user ID: %w", err)
+	}
+
+	user, err := domain.NewUser(userID, firstName, lastName, nullableString(middleName), storedLoginSnapshot, domain.Email(email))
+	if err != nil {
+		return nil, fmt.Errorf("restore user: %w", err)
+	}
+
+	return user, nil
+}
+
+func (r *identityRepository) FindByID(userID uuid.UUID) (*domain.User, error) {
+	return r.findOne("identity.find_by_id", `
+SELECT id, first_name, last_name, middle_name, login_snapshot, email
+FROM users
+WHERE id = ?
+`, userID.String())
+}
+
+func (r *identityRepository) Update(user *domain.User) error {
+	data := user.Data()
+	_, err := r.client.ExecContext(r.ctx, "identity.update", `
+UPDATE users
+SET first_name = ?, last_name = ?, middle_name = ?, email = ?
+WHERE id = ?
+`, data.FirstName, data.LastName, data.MiddleName, data.Email.String(), data.ID.String())
+	if err != nil {
+		return fmt.Errorf("update user: %w", err)
+	}
+
+	return nil
+}
+
+func (r *identityRepository) findOne(queryName, query, argument string) (*domain.User, error) {
+	var id, firstName, lastName, storedLoginSnapshot, email string
+	var middleName sql.NullString
+
+	err := r.client.QueryRowContext(
+		r.ctx,
+		queryName,
+		query,
+		argument,
+	).Scan(
+		&id,
+		&firstName,
+		&lastName,
+		&middleName,
+		&storedLoginSnapshot,
+		&email,
+	)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("find user: %w", err)
+	}
+
+	parsedID, err := uuid.Parse(id)
+	if err != nil {
+		return nil, fmt.Errorf("parse user ID: %w", err)
+	}
+	user, err := domain.NewUser(
+		parsedID,
+		firstName,
+		lastName,
+		nullableString(middleName),
+		storedLoginSnapshot,
+		domain.Email(email),
+	)
+	if err != nil {
+		return nil, fmt.Errorf("restore user: %w", err)
+	}
+
+	return user, nil
+}
+
+func nullableString(value sql.NullString) *string {
+	if !value.Valid {
+		return nil
+	}
+	return &value.String
+}
+
+
+===== FILE: internal/identity/infra/mysql/repositoryprovider.go =====
+
+package mysql
+
+import (
+	"context"
+
+	"github.com/distributed-programming-2026/go-sdk/pkg/mysql"
+
+	"identity/internal/identity/domain"
+	"identity/internal/identity/infra/mysql/repository"
+)
+
+func NewRepositoryProvider(client mysql.ClientContext) *RepositoryProvider {
+	return &RepositoryProvider{
+		client: client,
+	}
+}
+
+type RepositoryProvider struct {
+	client mysql.ClientContext
+}
+
+func (p *RepositoryProvider) Identity(ctx context.Context) domain.IdentityRepository {
+	return repository.NewIdentityRepository(ctx, p.client)
+}
+
+
+===== FILE: internal/integration-tests/api_test.go =====
+
+package integration_tests
+
+import (
+	"context"
+	"database/sql"
+	"testing"
+	"time"
+
+	"github.com/stretchr/testify/require"
+	"google.golang.org/grpc"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/credentials/insecure"
+	"google.golang.org/grpc/status"
+
+	identityapi "identity/api/server/internalapi"
+)
+
+const testUserLogin = "ada-lovelace"
+
+func stringPointer(value string) *string {
+	return &value
+}
+
+func identityClient(t *testing.T) identityapi.IdentityServiceClient {
+	t.Helper()
+	connection, err := grpc.NewClient(testEnv.conf.GRPC.Address, grpc.WithTransportCredentials(insecure.NewCredentials()))
+	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, connection.Close()) })
+	return identityapi.NewIdentityServiceClient(connection)
+}
+
+func TestIdentityGRPCUserLifecycle(t *testing.T) {
+	client := identityClient(t)
+	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
+	defer cancel()
+
+	created, err := client.CreateUser(ctx, &identityapi.CreateUserRequest{
+		FirstName:  "Ada",
+		LastName:   "Lovelace",
+		MiddleName: stringPointer("Byron"),
+		Login:      testUserLogin,
+		Email:      "ada@example.com",
+	})
+	require.NoError(t, err)
+	require.NotEmpty(t, created.GetUserId())
+
+	var stored struct {
+		FirstName  string  `db:"first_name"`
+		LastName   string  `db:"last_name"`
+		MiddleName *string `db:"middle_name"`
+		Login      string  `db:"login"`
+		Email      string  `db:"email"`
+	}
+	err = testEnv.connector.TransactionalClient().GetContext(t.Context(), "test.identity.user", &stored, `
+SELECT first_name, last_name, middle_name, login, email
+FROM users
+WHERE id = ?`, created.GetUserId())
+	require.NoError(t, err)
+	require.Equal(t, "Ada", stored.FirstName)
+	require.Equal(t, "Lovelace", stored.LastName)
+	require.NotNil(t, stored.MiddleName)
+	require.Equal(t, "Byron", *stored.MiddleName)
+	require.Equal(t, testUserLogin, stored.Login)
+	require.Equal(t, "ada@example.com", stored.Email)
+
+	found, err := client.FindUserByLogin(ctx, &identityapi.FindUserByLoginRequest{Login: testUserLogin})
+	require.NoError(t, err)
+	require.Equal(t, created.GetUserId(), found.GetUserId())
+
+	_, err = client.CreateUser(ctx, &identityapi.CreateUserRequest{
+		FirstName: "Another",
+		LastName:  "User",
+		Login:     testUserLogin,
+		Email:     "another@example.com",
+	})
+	require.Equal(t, codes.AlreadyExists, status.Code(err))
+}
+
+func TestIdentityGRPCRejectsMissingAndInvalidUsers(t *testing.T) {
+	client := identityClient(t)
+	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
+	defer cancel()
+
+	_, err := client.FindUserByLogin(ctx, &identityapi.FindUserByLoginRequest{Login: "absent"})
+	require.Equal(t, codes.NotFound, status.Code(err))
+
+	_, err = client.CreateUser(ctx, &identityapi.CreateUserRequest{
+		FirstName: "Ada",
+		LastName:  "Lovelace",
+		Login:     "ada",
+		Email:     "not-an-email",
+	})
+	require.Equal(t, codes.InvalidArgument, status.Code(err))
+}
+
+func TestIdentityGRPCAcceptsMissingMiddleName(t *testing.T) {
+	client := identityClient(t)
+	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
+	defer cancel()
+
+	created, err := client.CreateUser(ctx, &identityapi.CreateUserRequest{
+		FirstName: "No",
+		LastName:  "Middle",
+		Login:     "no-middle-name",
+		Email:     "no-middle-name@example.com",
+	})
+	require.NoError(t, err)
+
+	var middleName sql.NullString
+	err = testEnv.connector.TransactionalClient().GetContext(t.Context(), "test.identity.middle-name", &middleName, `
+SELECT middle_name FROM users WHERE id = ?`, created.GetUserId())
+	require.NoError(t, err)
+	require.False(t, middleName.Valid)
+}
+
+
+===== FILE: internal/integration-tests/helpers_test.go =====
+
+package integration_tests
+
+import (
+	"bytes"
+	"sync"
+
+	"github.com/testcontainers/testcontainers-go"
+)
+
+type logBuffer struct {
+	mu     sync.Mutex
+	buffer bytes.Buffer
+}
+
+func (b *logBuffer) Accept(log testcontainers.Log) {
+	_, _ = b.Write(log.Content)
+}
+
+func (b *logBuffer) Write(p []byte) (int, error) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.buffer.Write(p)
+}
+
+func (b *logBuffer) String() string {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.buffer.String()
+}
+
+
+===== FILE: internal/integration-tests/main_test.go =====
+
+package integration_tests
+
+import (
+	"context"
+	"errors"
+	"fmt"
+	"net"
+	"net/http"
+	"net/url"
+	"os"
+	"strings"
+	"testing"
+	"time"
+
+	"github.com/distributed-programming-2026/go-sdk/pkg/mysql"
+	mysqldriver "github.com/go-sql-driver/mysql"
+	"github.com/testcontainers/testcontainers-go"
+	tcmysql "github.com/testcontainers/testcontainers-go/modules/mysql"
+	"github.com/testcontainers/testcontainers-go/network"
+	"github.com/testcontainers/testcontainers-go/wait"
+
+	"identity/internal/identity/config"
+)
+
+const moduleID = "identity"
+
+var testEnv *environment
+
+type environment struct {
+	conf      config.Env
+	connector mysql.Connector
+	network   *testcontainers.DockerNetwork
+	logs      logBuffer
+	closers   []func() error
+}
+
+func TestMain(m *testing.M) {
+	os.Exit(runTests(m))
+}
+
+func runTests(m *testing.M) (exitCode int) {
+	testEnv = &environment{}
+	defer func() {
+		err := testEnv.close()
+		if err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			exitCode = 1
+		}
+		if exitCode != 0 {
+			fmt.Fprintln(os.Stderr, testEnv.logs.String())
+		}
+	}()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+	defer cancel()
+
+	err := testEnv.prepare(ctx)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		return 1
+	}
+	return m.Run()
+}
+
+func (e *environment) prepare(ctx context.Context) error {
+	e.conf = integrationConfig()
+
+	var err error
+	e.network, err = network.New(ctx)
+	if err != nil {
+		return err
+	}
+	e.closers = append(e.closers, func() error {
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+		return e.network.Remove(ctx)
+	})
+
+	mysqlContainer, err := tcmysql.Run(ctx, "mysql:8.4",
+		tcmysql.WithDatabase(moduleID+"_test"),
+		tcmysql.WithUsername(moduleID),
+		tcmysql.WithPassword("integration:password@local"),
+		network.WithNetwork([]string{"mysql"}, e.network),
+	)
+	if mysqlContainer != nil {
+		e.closers = append(e.closers, func() error {
+			return testcontainers.TerminateContainer(mysqlContainer)
+		})
+	}
+	if err != nil {
+		return err
+	}
+
+	dsn, err := mysqlContainer.ConnectionString(ctx, "parseTime=true")
+	if err != nil {
+		return err
+	}
+	databaseConfig, err := mysqldriver.ParseDSN(dsn)
+	if err != nil {
+		return err
+	}
+	e.conf.MySQL.Address = databaseConfig.Addr
+	e.conf.MySQL.Database = databaseConfig.DBName
+	e.conf.MySQL.User = databaseConfig.User
+	e.conf.MySQL.Password = databaseConfig.Passwd
+
+	err = e.startBroker(ctx)
+	if err != nil {
+		return err
+	}
+
+	e.connector = mysql.NewConnector()
+	err = e.connector.Open(dsn, mysql.Config{
+		MaxConnections: 10,
+	})
+	if err != nil {
+		return err
+	}
+	e.closers = append(e.closers, e.connector.Close)
+
+	_, err = e.startApplication(ctx, "message-handler")
+	if err != nil {
+		return err
+	}
+	service, err := e.startApplication(ctx, "service")
+	if err != nil {
+		return err
+	}
+	e.conf.HTTP.Address, err = containerAddress(ctx, service, "8082/tcp")
+	if err != nil {
+		return err
+	}
+	e.conf.GRPC.Address, err = containerAddress(ctx, service, "8081/tcp")
+	return err
+}
+
+func integrationConfig() config.Env {
+	return config.Env{
+		App: config.App{
+			GraceTimeout: time.Second,
+		},
+		AMQP: config.AMQP{
+			Queue: moduleID + ".echo",
+		},
+		Relay: config.Relay{
+			Interval:       50 * time.Millisecond,
+			PublishTimeout: time.Second,
+		},
+	}
+}
+
+func (e *environment) startBroker(ctx context.Context) error {
+	broker, err := e.startContainer(ctx, testcontainers.ContainerRequest{
+		Image:        "rabbitmq:4.1-alpine",
+		ExposedPorts: []string{"5672/tcp"},
+		Networks:     []string{e.network.Name},
+		NetworkAliases: map[string][]string{
+			e.network.Name: {"rabbitmq"},
+		},
+		Env: map[string]string{
+			"RABBITMQ_DEFAULT_USER": "integration",
+			"RABBITMQ_DEFAULT_PASS": "integration-password",
+		},
+		WaitingFor: wait.ForLog("Server startup complete").WithStartupTimeout(time.Minute),
+	})
+	if err != nil {
+		return err
+	}
+	address, err := containerAddress(ctx, broker, "5672/tcp")
+	if err != nil {
+		return err
+	}
+	brokerURL := &url.URL{
+		Scheme: "amqp",
+		User:   url.UserPassword("integration", "integration-password"),
+		Host:   address,
+		Path:   "/",
+	}
+	e.conf.AMQP.URL = brokerURL.String()
+	return nil
+}
+
+func (e *environment) startApplication(ctx context.Context, command string) (testcontainers.Container, error) {
+	prefix := strings.ToUpper(moduleID) + "_"
+	return e.startContainer(ctx, testcontainers.ContainerRequest{
+		Image:        "distributed-programming-identity:integration",
+		Cmd:          []string{command},
+		ExposedPorts: []string{"8081/tcp", "8082/tcp"},
+		Networks:     []string{e.network.Name},
+		Env: map[string]string{
+			prefix + "MYSQL_ADDRESS":         "mysql:3306",
+			prefix + "MYSQL_DATABASE":        e.conf.MySQL.Database,
+			prefix + "MYSQL_USER":            e.conf.MySQL.User,
+			prefix + "MYSQL_PASSWORD":        e.conf.MySQL.Password,
+			prefix + "AMQP_URL":              "amqp://integration:integration-password@rabbitmq:5672/",
+			prefix + "AMQP_QUEUE":            e.conf.AMQP.Queue,
+			prefix + "HTTP_ADDRESS":          ":8082",
+			prefix + "GRPC_ADDRESS":          ":8081",
+			prefix + "APP_GRACE_TIMEOUT":     e.conf.App.GraceTimeout.String(),
+			prefix + "RELAY_INTERVAL":        e.conf.Relay.Interval.String(),
+			prefix + "RELAY_PUBLISH_TIMEOUT": e.conf.Relay.PublishTimeout.String(),
+		},
+		LogConsumerCfg: &testcontainers.LogConsumerConfig{
+			Consumers: []testcontainers.LogConsumer{&e.logs},
+		},
+		WaitingFor: wait.ForHTTP("/healthz").WithPort("8082/tcp").WithStatusCodeMatcher(func(status int) bool {
+			return status == http.StatusNoContent
+		}).WithStartupTimeout(time.Minute),
+	})
+}
+
+func (e *environment) startContainer(ctx context.Context, request testcontainers.ContainerRequest) (testcontainers.Container, error) {
+	container, err := testcontainers.GenericContainer(ctx, testcontainers.GenericContainerRequest{
+		ContainerRequest: request,
+		Started:          true,
+	})
+	if container != nil {
+		e.closers = append(e.closers, func() error {
+			return testcontainers.TerminateContainer(container)
+		})
+	}
+	return container, err
+}
+
+func (e *environment) close() error {
+	var errs []error
+	for i := len(e.closers) - 1; i >= 0; i-- {
+		errs = append(errs, e.closers[i]())
+	}
+	return errors.Join(errs...)
+}
+
+func containerAddress(ctx context.Context, container testcontainers.Container, port string) (string, error) {
+	host, err := container.Host(ctx)
+	if err != nil {
+		return "", err
+	}
+	mappedPort, err := container.MappedPort(ctx, port)
+	if err != nil {
+		return "", err
+	}
+	return net.JoinHostPort(host, mappedPort.Port()), nil
+}
+
+
+===== FILE: mise-tasks/generate-migration =====
+
+#!/usr/bin/env python3
+#MISE description="Generate and register a MySQL migration"
+
+import json
+from pathlib import Path
+import re
+import subprocess
+import sys
+import time
+
+
+if len(sys.argv) < 2:
+    sys.exit('Usage: mise run //modules/identity:generate-migration "Description"')
+
+module_root = Path(__file__).resolve().parent.parent
+migration_dir = module_root / "internal/identity/infra/mysql/migrations"
+versions = [int(path.stem.removeprefix("version")) for path in migration_dir.glob("version*.go") if re.fullmatch(r"version[0-9]+", path.stem)]
+version = max(int(time.time()), max(versions, default=0) + 1)
+description = json.dumps(" ".join(sys.argv[1:]), ensure_ascii=False)
+factory = migration_dir / "factory.go"
+original_factory = factory.read_text()
+pattern = r"(var migrations = \[\]mysqlMigration\{)(.*?)(\n\})"
+match = re.search(pattern, original_factory, re.S)
+if match is None:
+    sys.exit("Cannot locate the migration registry in factory.go")
+
+migration = migration_dir / f"version{version}.go"
+source = f'''package migrations
+
+import (
+    "context"
+    "errors"
+
+    "github.com/distributed-programming-2026/go-sdk/pkg/migrator"
+    "github.com/distributed-programming-2026/go-sdk/pkg/mysql"
+)
+
+func Version{version}(client mysql.ClientContext) migrator.Migration {{
+    return &version{version}{{
+        client: client,
+    }}
+}}
+
+type version{version} struct {{
+    client mysql.ClientContext
+}}
+
+func (v *version{version}) Version() int64 {{
+    return {version}
+}}
+
+func (v *version{version}) Description() string {{
+    return {description}
+}}
+
+func (v *version{version}) Up(ctx context.Context) error {{
+    // TODO: implement the schema change using v.client.ExecContext(ctx, ...).
+    err := ctx.Err()
+    if err != nil {{
+        return err
+    }}
+    return errors.New("migration {version} is not implemented")
+}}
+'''
+new_factory = original_factory[:match.start(3)] + f"\n\tVersion{version}," + original_factory[match.start(3):]
+try:
+    migration.write_text(source)
+    factory.write_text(new_factory)
+    subprocess.run(["mise", "exec", "--", "gofmt", "-w", str(migration), str(factory)], cwd=module_root, check=True)
+except BaseException:
+    migration.unlink(missing_ok=True)
+    factory.write_text(original_factory)
+    raise
+print(f"Created {migration.relative_to(module_root)}. Implement Up before starting the service.")
+
+
+===== FILE: mise.toml =====
+
+[tasks.all]
+run = [
+    { task = "generate" },
+    { task = "modules" },
+    { task = "build" },
+    { task = "test" },
+    { task = "integration-tests" },
+    { task = "lint" },
+]
+
+[tasks.generate]
+run = [
+    { task = "grpc-generate" },
+    { task = "oapi-generate" },
+    { task = "go-generate" },
+]
+
+[tasks.go-generate]
+run = "go generate ./..."
+
+[tasks.grpc-generate]
+run = """
+#!/usr/bin/env sh
+set -eu
+
+find . -name '*.proto' | while read -r proto_file; do
+    proto_dir=$(dirname "$proto_file")
+    protoc \
+        --proto_path="$proto_dir" \
+        --go_out="$proto_dir" \
+        --go_opt=paths=source_relative \
+        --go-grpc_out="$proto_dir" \
+        --go-grpc_opt=paths=source_relative \
+        "$proto_file"
+done
+"""
+[tasks.oapi-generate]
+run = """
+#!/usr/bin/env sh
+set -eu
+
+find . -name '*.oapi.yaml' | while read -r oapi_file; do
+    base_filename="${oapi_file%.*}"
+    oapi-codegen \
+        -generate types,chi-server,strict-server,client,spec \
+        -o "$base_filename.gen.go" "$oapi_file"
+done
+"""
+
+[tasks."modules"]
+run = "go mod tidy"
+
+[tasks.build]
+depends = ["generate"]
+env = { GOOS = "linux", CGO_ENABLED = "0" }
+run = "go build -v -trimpath -o dist/identity ./cmd"
+
+[tasks."test"]
+run = '''
+#!/usr/bin/env sh
+set -eu
+
+packages=$(go list ./...)
+printf '%s\n' "$packages" | awk '!/\/internal\/integration-tests($|\/)/' | xargs go test
+'''
+
+[tasks."lint"]
+run = "golangci-lint run"
+
+[tasks.integration-tests]
+depends = ["build"]
+run = [
+    "docker build --tag distributed-programming-identity:integration .",
+    "go test -v -count=1 ./internal/integration-tests",
+]

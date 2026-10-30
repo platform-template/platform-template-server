@@ -3,17 +3,19 @@ module identity
 go 1.27.1
 
 require (
-	github.com/distributed-programming-2026/go-sdk/pkg/amqp v0.0.3
-	github.com/distributed-programming-2026/go-sdk/pkg/event v0.0.3
-	github.com/distributed-programming-2026/go-sdk/pkg/logging v0.0.3
-	github.com/distributed-programming-2026/go-sdk/pkg/migrator v0.0.3
-	github.com/distributed-programming-2026/go-sdk/pkg/mysql v0.0.3
-	github.com/distributed-programming-2026/go-sdk/pkg/uow v0.0.3
+	github.com/distributed-programming-2026/go-sdk/pkg/amqp v0.0.5
+	github.com/distributed-programming-2026/go-sdk/pkg/event v0.0.5
+	github.com/distributed-programming-2026/go-sdk/pkg/logging v0.0.6
+	github.com/distributed-programming-2026/go-sdk/pkg/migrator v0.0.5
+	github.com/distributed-programming-2026/go-sdk/pkg/mysql v0.0.5
+	github.com/distributed-programming-2026/go-sdk/pkg/uow v0.0.5
 	github.com/distributed-programming-2026/lib v0.0.0
 	github.com/getkin/kin-openapi v0.149.0
 	github.com/go-chi/chi/v5 v5.3.2
 	github.com/go-sql-driver/mysql v1.10.1
+	github.com/google/uuid v1.6.0
 	github.com/kelseyhightower/envconfig v1.4.0
+	github.com/oapi-codegen/runtime v1.8.0
 	github.com/stretchr/testify v1.12.1
 	github.com/testcontainers/testcontainers-go v0.44.0
 	github.com/testcontainers/testcontainers-go/modules/mysql v0.44.0
@@ -35,7 +37,8 @@ require (
 	github.com/containerd/log v0.1.0 // indirect
 	github.com/containerd/platforms v0.2.1 // indirect
 	github.com/cpuguy83/dockercfg v0.3.2 // indirect
-	github.com/distributed-programming-2026/go-sdk/internal/sharedpool v0.0.3 // indirect
+	github.com/distributed-programming-2026/go-sdk/internal/sharedpool v0.0.5 // indirect
+	github.com/distributed-programming-2026/go-sdk/pkg/integrationtests v0.0.6 // indirect
 	github.com/distribution/reference v0.6.0 // indirect
 	github.com/docker/go-connections v0.7.0 // indirect
 	github.com/docker/go-units v0.5.0 // indirect
@@ -46,7 +49,6 @@ require (
 	github.com/go-ole/go-ole v1.3.0 // indirect
 	github.com/go-openapi/jsonpointer v0.22.5 // indirect
 	github.com/go-openapi/swag/jsonname v0.25.5 // indirect
-	github.com/google/uuid v1.6.0 // indirect
 	github.com/jmoiron/sqlx v1.4.0 // indirect
 	github.com/klauspost/compress v1.18.6 // indirect
 	github.com/lufia/plan9stats v0.0.0-20260330125221-c963978e514e // indirect

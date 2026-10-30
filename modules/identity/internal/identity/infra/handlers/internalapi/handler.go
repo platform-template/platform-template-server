@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"log/slog"
+	"uuid"
 
 	"github.com/distributed-programming-2026/go-sdk/pkg/logging"
 	"google.golang.org/grpc/codes"
@@ -31,8 +32,11 @@ func (h handler) CreateUser(
 	ctx context.Context,
 	req *identityinternalapi.CreateUserRequest,
 ) (*identityinternalapi.CreateUserResponse, error) {
-	userID, err := h.svc.Create(
+	userID := uuid.New()
+
+	err := h.svc.CreateWithID(
 		ctx,
+		userID,
 		req.GetFirstName(),
 		req.GetLastName(),
 		req.MiddleName,

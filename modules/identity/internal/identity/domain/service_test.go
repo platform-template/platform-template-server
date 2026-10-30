@@ -10,8 +10,6 @@ import (
 )
 
 type fakeIdentityRepository struct {
-	nextID       uuid.UUID
-	nextIDErr    error
 	existingUser *User
 	findErr      error
 	findByIDErr  error
@@ -23,16 +21,10 @@ type fakeIdentityRepository struct {
 	foundLogin  string
 	foundID     uuid.UUID
 
-	nextIDCalls   int
 	findCalls     int
 	storeCalls    int
 	findByIDCalls int
 	updateCalls   int
-}
-
-func (f *fakeIdentityRepository) NextID() (uuid.UUID, error) {
-	f.nextIDCalls++
-	return f.nextID, f.nextIDErr
 }
 
 func (f *fakeIdentityRepository) Store(user *User) error {
@@ -61,15 +53,13 @@ func (f *fakeIdentityRepository) Update(user *User) error {
 
 var _ IdentityRepository = (*fakeIdentityRepository)(nil)
 
-func TestIdentityService_Create(t *testing.T) {
-	expectedID := uuid.New()
-
-	repo := &fakeIdentityRepository{
-		nextID: expectedID,
-	}
+func TestIdentityService_CreateWithID(t *testing.T) {
+	userID := uuid.New()
+	repo := &fakeIdentityRepository{}
 	service := NewIdentityService(repo)
 
-	id, err := service.Create(
+	err := service.CreateWithID(
+		userID,
 		"  Alex  ",
 		"  Smith  ",
 		stringPointer("  James  "),
@@ -78,15 +68,12 @@ func TestIdentityService_Create(t *testing.T) {
 	)
 
 	require.NoError(t, err)
-	assert.Equal(t, expectedID, id)
 	assert.Zero(t, repo.findCalls, "identity must not check login uniqueness")
-	assert.Equal(t, 1, repo.nextIDCalls, "NextID calls")
-	assert.Equal(t, 1, repo.storeCalls, "Store calls")
-	assert.Empty(t, repo.foundLogin)
+	assert.Equal(t, 1, repo.storeCalls)
 	require.NotNil(t, repo.storedUser)
 
 	user := repo.storedUser
-	assert.Equal(t, expectedID, user.id)
+	assert.Equal(t, userID, user.id)
 	assert.Equal(t, "Alex", user.firstName)
 	assert.Equal(t, "Smith", user.lastName)
 	require.NotNil(t, user.middleName)
@@ -113,95 +100,83 @@ func validCreateInput() createInput {
 	}
 }
 
-func TestIdentityService_Create_Errors(t *testing.T) {
-	nextIDErr := errors.New("next ID failed")
+func TestIdentityService_CreateWithID_Errors(t *testing.T) {
 	storeErr := errors.New("store failed")
+	validID := uuid.New()
 
 	tests := []struct {
 		name        string
+		userID      uuid.UUID
 		modifyInput func(*createInput)
-		modifyRepo  func(*fakeIdentityRepository)
+		storeErr    error
 		wantErr     error
-		wantFind    int
-		wantNextID  int
 		wantStore   int
 	}{
 		{
-			name: "empty login",
+			name:    "invalid user ID",
+			userID:  uuid.Nil(),
+			wantErr: ErrInvalidUserID,
+		},
+		{
+			name:   "empty login",
+			userID: validID,
 			modifyInput: func(i *createInput) {
 				i.login = ""
 			},
 			wantErr: ErrInvalidLogin,
 		},
 		{
-			name: "whitespace login",
+			name:   "whitespace login",
+			userID: validID,
 			modifyInput: func(i *createInput) {
 				i.login = testWhitespace
 			},
 			wantErr: ErrInvalidLogin,
 		},
 		{
-			name: "next ID error",
-			modifyRepo: func(r *fakeIdentityRepository) {
-				r.nextIDErr = nextIDErr
-			},
-			wantErr:    nextIDErr,
-			wantNextID: 1,
-		},
-		{
-			name: "invalid email",
+			name:   "invalid email",
+			userID: validID,
 			modifyInput: func(i *createInput) {
 				i.email = "invalid-email"
 			},
-			wantErr:    ErrInvalidEmail,
-			wantNextID: 1,
+			wantErr: ErrInvalidEmail,
 		},
 		{
-			name: "empty first name",
+			name:   "empty first name",
+			userID: validID,
 			modifyInput: func(i *createInput) {
 				i.firstName = ""
 			},
-			wantErr:    ErrInvalidFirstName,
-			wantNextID: 1,
+			wantErr: ErrInvalidFirstName,
 		},
 		{
-			name: "empty last name",
+			name:   "empty last name",
+			userID: validID,
 			modifyInput: func(i *createInput) {
 				i.lastName = testWhitespace
 			},
-			wantErr:    ErrInvalidLastName,
-			wantNextID: 1,
+			wantErr: ErrInvalidLastName,
 		},
 		{
-			name: "store error",
-			modifyRepo: func(r *fakeIdentityRepository) {
-				r.storeErr = storeErr
-			},
-			wantErr:    storeErr,
-			wantNextID: 1,
-			wantStore:  1,
+			name:      "store error",
+			userID:    validID,
+			storeErr:  storeErr,
+			wantErr:   storeErr,
+			wantStore: 1,
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			input := validCreateInput()
-
-			repo := &fakeIdentityRepository{
-				nextID: uuid.New(),
-			}
+			repo := &fakeIdentityRepository{storeErr: tt.storeErr}
 
 			if tt.modifyInput != nil {
 				tt.modifyInput(&input)
 			}
 
-			if tt.modifyRepo != nil {
-				tt.modifyRepo(repo)
-			}
-
-			service := NewIdentityService(repo)
-
-			id, err := service.Create(
+			err := NewIdentityService(repo).CreateWithID(
+				tt.userID,
 				input.firstName,
 				input.lastName,
 				input.middleName,
@@ -210,14 +185,8 @@ func TestIdentityService_Create_Errors(t *testing.T) {
 			)
 
 			require.ErrorIs(t, err, tt.wantErr)
-
-			assert.Equal(t, uuid.Nil(), id)
-
-			assert.Equal(t, tt.wantFind, repo.findCalls)
-
-			assert.Equal(t, tt.wantNextID, repo.nextIDCalls)
-
 			assert.Equal(t, tt.wantStore, repo.storeCalls)
+			assert.Zero(t, repo.findCalls)
 		})
 	}
 }
