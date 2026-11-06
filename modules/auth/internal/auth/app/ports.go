@@ -15,3 +15,22 @@ type SessionClient interface {
 	RevokeSession(ctx context.Context, token string) error
 	RevokeOthersByUserID(ctx context.Context, userID uuid.UUID, token string) error
 }
+
+type RegistrationIdentityClient interface {
+	Prepare(
+		ctx context.Context,
+		transactionID uuid.UUID,
+		userID uuid.UUID,
+		firstName, lastName, middleName, login, email string,
+	) error
+
+	Commit(
+		ctx context.Context,
+		transactionID uuid.UUID,
+	) error
+
+	Rollback(
+		ctx context.Context,
+		transactionID uuid.UUID,
+	) error
+}

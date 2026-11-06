@@ -18,7 +18,7 @@ type database struct {
 	unit      uow.UnitOfWorkWithRepositoryProvider[*echomysql.RepositoryProvider]
 }
 
-func openDatabase(ctx context.Context, logger *slog.Logger, conf config.Env) (_ *database, err error) {
+func mysqlDSN(conf config.Env) string {
 	dsn := mysqldriver.NewConfig()
 	dsn.Net = "tcp"
 	dsn.Addr = conf.MySQL.Address
@@ -33,8 +33,12 @@ func openDatabase(ctx context.Context, logger *slog.Logger, conf config.Env) (_ 
 		"charset": "utf8mb4",
 	}
 
+	return dsn.FormatDSN()
+}
+
+func openDatabase(ctx context.Context, logger *slog.Logger, conf config.Env) (_ *database, err error) {
 	connector := mysql.NewConnector()
-	err = connector.Open(dsn.FormatDSN(), mysql.Config{
+	err = connector.Open(mysqlDSN(conf), mysql.Config{
 		MaxConnections:        conf.MySQL.MaxConnections,
 		ConnectionMaxLifeTime: conf.MySQL.ConnectionMaxLifeTime,
 		ConnectionMaxIdleTime: conf.MySQL.ConnectionMaxIdleTime,
