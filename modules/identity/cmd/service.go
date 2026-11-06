@@ -30,6 +30,14 @@ func service(ctx context.Context, logger *slog.Logger, conf config.Env) (err err
 		err = errors.Join(err, db.connector.Close())
 	}()
 
+	xaResource, xaDB, err := openXAResource(ctx, conf)
+	if err != nil {
+		return err
+	}
+	defer func() {
+		err = errors.Join(err, xaDB.Close())
+	}()
+
 	connection := newConnection(logger, conf)
 	defer func() {
 		err = errors.Join(err, connection.Stop())
@@ -40,23 +48,25 @@ func service(ctx context.Context, logger *slog.Logger, conf config.Env) (err err
 		return err
 	}
 
-	err = connection.Start()
-	if err != nil {
+	if err := connection.Start(); err != nil {
 		return err
 	}
 
 	svc := app.NewService(db.unit)
+	registration := app.NewRegistrationService(xaResource)
+
 	httpServer, err := newHTTPServer(logger, conf, svc)
 	if err != nil {
 		return err
 	}
 
-	grpcServer, err := newGRPCServer(logger, conf, svc)
+	grpcServer, err := newGRPCServer(logger, conf, svc, registration)
 	if err != nil {
 		return err
 	}
 
 	errGroup, egCtx := errgroup.WithContext(ctx)
+
 	errGroup.Go(func() error {
 		return httpServer.Serve(egCtx)
 	})
@@ -66,5 +76,6 @@ func service(ctx context.Context, logger *slog.Logger, conf config.Env) (err err
 	errGroup.Go(func() error {
 		return runRelay(egCtx, logger, relay, conf.Relay)
 	})
+
 	return errGroup.Wait()
 }

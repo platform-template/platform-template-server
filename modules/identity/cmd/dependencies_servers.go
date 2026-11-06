@@ -28,12 +28,21 @@ func newHTTPServer(logger *slog.Logger, conf config.Env, svc *app.Service) (*htt
 	}, register)
 }
 
-func newGRPCServer(logger *slog.Logger, conf config.Env, svc *app.Service) (*grpc.Server, error) {
+func newGRPCServer(
+	logger *slog.Logger,
+	conf config.Env,
+	svc *app.Service,
+	registration *app.RegistrationService,
+) (*grpc.Server, error) {
 	return grpc.NewServer(grpc.Config{
 		Address:      conf.GRPC.Address,
 		GraceTimeout: conf.App.GraceTimeout,
 	}, func(server *grpcserver.Server) error {
-		internalapi.RegisterIdentityServiceServer(server, internalhandler.NewHandler(svc, logger))
+		internalapi.RegisterIdentityServiceServer(
+			server,
+			internalhandler.NewHandler(svc, registration, logger),
+		)
+
 		reflection.Register(server)
 		return nil
 	})
