@@ -7,17 +7,31 @@ import (
 	"fmt"
 	"uuid"
 
-	"github.com/distributed-programming-2026/go-sdk/pkg/mysql"
-
 	"auth/internal/auth/domain"
 )
 
-type authRepository struct {
-	ctx    context.Context
-	client mysql.ClientContext
+type Client interface {
+	ExecContext(
+		ctx context.Context,
+		queryID string,
+		query string,
+		args ...any,
+	) (sql.Result, error)
+
+	QueryRowContext(
+		ctx context.Context,
+		queryID string,
+		query string,
+		args ...any,
+	) *sql.Row
 }
 
-func NewAuthRepository(ctx context.Context, client mysql.ClientContext) domain.AuthRepository {
+type authRepository struct {
+	ctx    context.Context
+	client Client
+}
+
+func NewAuthRepository(ctx context.Context, client Client) domain.AuthRepository {
 	return &authRepository{
 		ctx:    ctx,
 		client: client,
