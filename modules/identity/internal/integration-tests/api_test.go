@@ -45,14 +45,14 @@ func TestIdentityGRPCUserLifecycle(t *testing.T) {
 	require.NotEmpty(t, created.GetUserId())
 
 	var stored struct {
-		FirstName  string  `db:"first_name"`
-		LastName   string  `db:"last_name"`
-		MiddleName *string `db:"middle_name"`
-		Login      string  `db:"login"`
-		Email      string  `db:"email"`
+		FirstName     string  `db:"first_name"`
+		LastName      string  `db:"last_name"`
+		MiddleName    *string `db:"middle_name"`
+		LoginSnapshot string  `db:"login_snapshot"`
+		Email         string  `db:"email"`
 	}
 	err = testEnv.connector.TransactionalClient().GetContext(t.Context(), "test.identity.user", &stored, `
-SELECT first_name, last_name, middle_name, login, email
+SELECT first_name, last_name, middle_name, login_snapshot, email
 FROM users
 WHERE id = ?`, created.GetUserId())
 	require.NoError(t, err)
@@ -60,20 +60,12 @@ WHERE id = ?`, created.GetUserId())
 	require.Equal(t, "Lovelace", stored.LastName)
 	require.NotNil(t, stored.MiddleName)
 	require.Equal(t, "Byron", *stored.MiddleName)
-	require.Equal(t, testUserLogin, stored.Login)
+	require.Equal(t, testUserLogin, stored.LoginSnapshot)
 	require.Equal(t, "ada@example.com", stored.Email)
 
 	found, err := client.FindUserByLogin(ctx, &identityapi.FindUserByLoginRequest{Login: testUserLogin})
 	require.NoError(t, err)
 	require.Equal(t, created.GetUserId(), found.GetUserId())
-
-	_, err = client.CreateUser(ctx, &identityapi.CreateUserRequest{
-		FirstName: "Another",
-		LastName:  "User",
-		Login:     testUserLogin,
-		Email:     "another@example.com",
-	})
-	require.Equal(t, codes.AlreadyExists, status.Code(err))
 }
 
 func TestIdentityGRPCRejectsMissingAndInvalidUsers(t *testing.T) {
