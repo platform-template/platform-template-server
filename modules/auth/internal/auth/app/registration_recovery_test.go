@@ -7,16 +7,18 @@ import (
 	"uuid"
 )
 
-func TestRecoverCommits(t *testing.T) {
+func TestRecoverPending(t *testing.T) {
 	failure := errors.New("simulated failure")
 
 	tests := []struct {
-		name              string
-		state             RegistrationState
-		identityCommitErr error
-		wantState         RegistrationState
-		wantErr           bool
-		wantCalls         []string
+		name                string
+		state               RegistrationState
+		identityCommitErr   error
+		wantState           RegistrationState
+		wantErr             bool
+		wantCalls           []string
+		authRollbackErr     error
+		identityRollbackErr error
 	}{
 		{
 			name:      "recover committed decision",
@@ -46,10 +48,25 @@ func TestRecoverCommits(t *testing.T) {
 			wantErr:   true,
 		},
 		{
-			name:      "abort is not recovered yet",
+			name:      "recover aborted decision",
 			state:     RegistrationAbortDecided,
-			wantState: RegistrationAbortDecided,
-			wantErr:   true,
+			wantState: RegistrationAborted,
+			wantCalls: []string{
+				"auth.rollback",
+				"identity.rollback",
+				"journal.mark_aborted",
+			},
+		},
+		{
+			name:                "identity rollback failed",
+			state:               RegistrationAbortDecided,
+			identityRollbackErr: failure,
+			wantState:           RegistrationAbortDecided,
+			wantErr:             true,
+			wantCalls: []string{
+				"auth.rollback",
+				"identity.rollback",
+			},
 		},
 	}
 
@@ -74,16 +91,18 @@ func TestRecoverCommits(t *testing.T) {
 
 			auth := &coordinatorAuthMock{
 				coordinatorBranchMock: &coordinatorBranchMock{
-					name:  "auth",
-					calls: &calls,
+					name:        "auth",
+					calls:       &calls,
+					rollbackErr: tt.authRollbackErr,
 				},
 			}
 
 			identity := &coordinatorIdentityMock{
 				coordinatorBranchMock: &coordinatorBranchMock{
-					name:      "identity",
-					calls:     &calls,
-					commitErr: tt.identityCommitErr,
+					name:        "identity",
+					calls:       &calls,
+					commitErr:   tt.identityCommitErr,
+					rollbackErr: tt.identityRollbackErr,
 				},
 			}
 
@@ -93,7 +112,7 @@ func TestRecoverCommits(t *testing.T) {
 				identity,
 			)
 
-			err := coordinator.RecoverCommits(t.Context())
+			err := coordinator.RecoverPending(t.Context())
 
 			if (err != nil) != tt.wantErr {
 				t.Fatalf("unexpected error: %v", err)
@@ -115,5 +134,27 @@ func TestRecoverCommits(t *testing.T) {
 				)
 			}
 		})
+	}
+}
+
+func TestRecoverPendingJournalError(t *testing.T) {
+	failure := errors.New("database unavailable")
+	var calls []string
+
+	journal := &coordinatorJournalMock{
+		calls:   &calls,
+		listErr: failure,
+	}
+
+	coordinator := NewRegistrationCoordinator(
+		journal,
+		nil,
+		nil,
+	)
+
+	err := coordinator.RecoverPending(t.Context())
+
+	if !errors.Is(err, failure) {
+		t.Fatalf("expected journal error, got %v", err)
 	}
 }

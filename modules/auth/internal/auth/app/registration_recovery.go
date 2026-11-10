@@ -4,9 +4,42 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"uuid"
 )
 
-func (c *RegistrationCoordinator) RecoverCommits(
+func (c *RegistrationCoordinator) finishAbort(
+	ctx context.Context,
+	transactionID uuid.UUID,
+) error {
+	settleCtx, cancel := context.WithTimeout(
+		context.WithoutCancel(ctx),
+		registrationSettlementTimeout,
+	)
+	defer cancel()
+
+	authErr := c.auth.Rollback(settleCtx, transactionID)
+	identityErr := c.identity.Rollback(settleCtx, transactionID)
+
+	if err := errors.Join(authErr, identityErr); err != nil {
+		return fmt.Errorf(
+			"%w: rollback participants: %w",
+			ErrRegistrationPending,
+			err,
+		)
+	}
+
+	if err := c.journal.MarkAborted(settleCtx, transactionID); err != nil {
+		return fmt.Errorf(
+			"%w: mark aborted: %w",
+			ErrRegistrationPending,
+			err,
+		)
+	}
+
+	return nil
+}
+
+func (c *RegistrationCoordinator) RecoverPending(
 	ctx context.Context,
 ) error {
 	pending, err := c.journal.ListPending(ctx)
@@ -37,14 +70,25 @@ func (c *RegistrationCoordinator) RecoverCommits(
 				)
 			}
 
-		case RegistrationPreparing, RegistrationAbortDecided:
+		case RegistrationAbortDecided:
+			if err := c.finishAbort(ctx, tx.TransactionID); err != nil {
+				recoveryErr = errors.Join(
+					recoveryErr,
+					fmt.Errorf(
+						"registration recovery: abort %s: %w",
+						tx.TransactionID,
+						err,
+					),
+				)
+			}
+
+		case RegistrationPreparing:
 			recoveryErr = errors.Join(
 				recoveryErr,
 				fmt.Errorf(
-					"%w: transaction %s in state %s",
+					"%w: transaction %s still preparing",
 					ErrRegistrationPending,
 					tx.TransactionID,
-					tx.State,
 				),
 			)
 
