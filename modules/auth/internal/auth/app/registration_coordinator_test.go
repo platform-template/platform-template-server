@@ -13,6 +13,8 @@ type coordinatorJournalMock struct {
 	calls           *[]string
 	decideCommitErr error
 	decideAbortErr  error
+	pending         []RegistrationTransaction
+	listErr         error
 }
 
 func (m *coordinatorJournalMock) record(action string) {
@@ -71,10 +73,14 @@ func (m *coordinatorJournalMock) Get(
 	return RegistrationTransaction{State: m.state}, nil
 }
 
-func (m *coordinatorJournalMock) ListPending(
+func (f *coordinatorJournalMock) ListPending(
 	_ context.Context,
 ) ([]RegistrationTransaction, error) {
-	return nil, nil
+	if f.listErr != nil {
+		return nil, f.listErr
+	}
+
+	return f.pending, nil
 }
 
 type coordinatorBranchMock struct {
