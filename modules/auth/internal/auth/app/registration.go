@@ -50,7 +50,11 @@ func (p *RegistrationParticipant) Prepare(
 
 			svc := domain.NewAuthService(repo, p.hasher)
 
-			return svc.Create(userID, login, password)
+			if err := svc.Create(userID, login, password); err != nil {
+				return err
+			}
+
+			return xa.RecordCommitReceipt(ctx, executor, xid)
 		},
 	)
 	if err != nil {

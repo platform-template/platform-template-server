@@ -42,7 +42,18 @@ func (s *RegistrationService) Prepare(
 		repo := repository.NewIdentityRepository(ctx, client)
 		svc := domain.NewIdentityService(repo)
 
-		return svc.CreateWithID(userID, firstName, lastName, middleName, loginSnapshot, email)
+		if err := svc.CreateWithID(
+			userID,
+			firstName,
+			lastName,
+			middleName,
+			loginSnapshot,
+			email,
+		); err != nil {
+			return err
+		}
+
+		return xa.RecordCommitReceipt(ctx, executor, xid)
 	})
 	if err != nil {
 		return fmt.Errorf("identity: prepare registration: %w", err)

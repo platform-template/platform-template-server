@@ -56,7 +56,15 @@ func TestXARegistration(t *testing.T) {
 			TransactionId: transactionID.String(),
 		})
 		require.NoError(t, err)
+		require.Equal(t, 1, countXAUser(t, ctx, userID))
 
+		_, err = client.CommitRegistration(
+			ctx,
+			&identityapi.RegistrationTransactionRequest{
+				TransactionId: transactionID.String(),
+			},
+		)
+		require.NoError(t, err)
 		require.Equal(t, 1, countXAUser(t, ctx, userID))
 	})
 
@@ -96,5 +104,19 @@ func TestXARegistration(t *testing.T) {
 		})
 
 		require.Equal(t, codes.InvalidArgument, status.Code(err))
+	})
+
+	t.Run("commit unknown transaction", func(t *testing.T) {
+		ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
+		defer cancel()
+
+		_, err := client.CommitRegistration(
+			ctx,
+			&identityapi.RegistrationTransactionRequest{
+				TransactionId: uuid.New().String(),
+			},
+		)
+
+		require.Error(t, err)
 	})
 }

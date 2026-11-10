@@ -90,7 +90,24 @@ func (m *MySQL) Prepare(
 }
 
 func (m *MySQL) Commit(ctx context.Context, xid XID) error {
-	return m.finish(ctx, xid, "XA COMMIT")
+	err := m.finish(ctx, xid, "XA COMMIT")
+	if err == nil {
+		return nil
+	}
+
+	committed, checkErr := m.Committed(ctx, xid)
+	if checkErr != nil {
+		return errors.Join(
+			err,
+			fmt.Errorf("xa: verify commit outcome: %w", checkErr),
+		)
+	}
+
+	if committed {
+		return nil
+	}
+
+	return err
 }
 
 func (m *MySQL) Rollback(ctx context.Context, xid XID) error {

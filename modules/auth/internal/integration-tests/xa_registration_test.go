@@ -87,9 +87,28 @@ func TestXARegistration(t *testing.T) {
 			"xa-commit-"+userID.String(),
 			"secure-password",
 		)
+		resource, err := xa.NewMySQL(db)
 		require.NoError(t, err)
 
+		xid := xa.XID{
+			TransactionID: transactionID,
+			Branch:        "auth",
+		}
+
+		committed, err := resource.Committed(ctx, xid)
+		require.NoError(t, err)
+		require.False(t, committed)
+
 		require.Zero(t, countCredentials(t, ctx, db, userID))
+
+		err = participant.Commit(ctx, transactionID)
+		require.NoError(t, err)
+
+		committed, err = resource.Committed(ctx, xid)
+		require.NoError(t, err)
+		require.True(t, committed)
+
+		require.Equal(t, 1, countCredentials(t, ctx, db, userID))
 
 		err = participant.Commit(ctx, transactionID)
 		require.NoError(t, err)
