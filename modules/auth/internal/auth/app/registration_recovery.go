@@ -83,14 +83,29 @@ func (c *RegistrationCoordinator) RecoverPending(
 			}
 
 		case RegistrationPreparing:
-			recoveryErr = errors.Join(
-				recoveryErr,
-				fmt.Errorf(
-					"%w: transaction %s still preparing",
-					ErrRegistrationPending,
-					tx.TransactionID,
-				),
-			)
+			if err := c.journal.DecideAbort(ctx, tx.TransactionID); err != nil {
+				recoveryErr = errors.Join(
+					recoveryErr,
+					fmt.Errorf(
+						"%w: persist ABORT decision for %s: %w",
+						ErrRegistrationPending,
+						tx.TransactionID,
+						err,
+					),
+				)
+				continue
+			}
+
+			if err := c.finishAbort(ctx, tx.TransactionID); err != nil {
+				recoveryErr = errors.Join(
+					recoveryErr,
+					fmt.Errorf(
+						"registration recovery: abort %s: %w",
+						tx.TransactionID,
+						err,
+					),
+				)
+			}
 
 		default:
 			recoveryErr = errors.Join(

@@ -1,6 +1,7 @@
 package app
 
 import (
+	"context"
 	"errors"
 	"slices"
 	"testing"
@@ -42,10 +43,15 @@ func TestRecoverPending(t *testing.T) {
 			},
 		},
 		{
-			name:      "preparing is not recovered",
+			name:      "recover preparing transaction",
 			state:     RegistrationPreparing,
-			wantState: RegistrationPreparing,
-			wantErr:   true,
+			wantState: RegistrationAborted,
+			wantCalls: []string{
+				"journal.decide_abort",
+				"auth.rollback",
+				"identity.rollback",
+				"journal.mark_aborted",
+			},
 		},
 		{
 			name:      "recover aborted decision",
@@ -156,5 +162,84 @@ func TestRecoverPendingJournalError(t *testing.T) {
 
 	if !errors.Is(err, failure) {
 		t.Fatalf("expected journal error, got %v", err)
+	}
+}
+
+type failingRecoveryAbortJournal struct {
+	RegistrationJournal
+	err error
+}
+
+func (j *failingRecoveryAbortJournal) DecideAbort(
+	_ context.Context,
+	_ uuid.UUID,
+) error {
+	return j.err
+}
+
+func TestRecoverPendingAbortDecisionFailure(t *testing.T) {
+	failure := errors.New("database unavailable")
+
+	var calls []string
+
+	transactionID := uuid.New()
+
+	baseJournal := &coordinatorJournalMock{
+		calls: &calls,
+		state: RegistrationPreparing,
+		pending: []RegistrationTransaction{
+			{
+				TransactionID: transactionID,
+				UserID:        uuid.New(),
+				State:         RegistrationPreparing,
+			},
+		},
+	}
+
+	journal := &failingRecoveryAbortJournal{
+		RegistrationJournal: baseJournal,
+		err:                 failure,
+	}
+
+	auth := &coordinatorAuthMock{
+		coordinatorBranchMock: &coordinatorBranchMock{
+			name:  "auth",
+			calls: &calls,
+		},
+	}
+
+	identity := &coordinatorIdentityMock{
+		coordinatorBranchMock: &coordinatorBranchMock{
+			name:  "identity",
+			calls: &calls,
+		},
+	}
+
+	coordinator := NewRegistrationCoordinator(
+		journal,
+		auth,
+		identity,
+	)
+
+	err := coordinator.RecoverPending(t.Context())
+
+	if !errors.Is(err, failure) {
+		t.Fatalf("expected journal failure, got %v", err)
+	}
+
+	if !errors.Is(err, ErrRegistrationPending) {
+		t.Fatalf("expected pending transaction, got %v", err)
+	}
+
+	if baseJournal.state != RegistrationPreparing {
+		t.Errorf(
+			"state: got %s, want %s",
+			baseJournal.state,
+			RegistrationPreparing,
+		)
+	}
+
+	if len(calls) != 0 {
+		t.Errorf("unexpected participant calls: %v", calls)
 	}
 }
