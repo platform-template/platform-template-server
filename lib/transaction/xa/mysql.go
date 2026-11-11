@@ -8,6 +8,8 @@ import (
 	"fmt"
 	"time"
 	"uuid"
+
+	mysqldriver "github.com/go-sql-driver/mysql"
 )
 
 const cleanupTimeout = 5 * time.Second
@@ -61,6 +63,22 @@ func (m *MySQL) Prepare(
 		err = errors.Join(err, conn.Close())
 	}()
 
+	unlock, err := acquireBranchLock(ctx, conn, xid)
+	if err != nil {
+		return err
+	}
+	defer func() {
+		err = errors.Join(err, unlock())
+	}()
+
+	aborted, err := isBranchAborted(ctx, conn, xid)
+	if err != nil {
+		return fmt.Errorf("xa: check abort barrier: %w", err)
+	}
+	if aborted {
+		return ErrBranchAborted
+	}
+
 	sqlXID := xid.sqlLiteral()
 
 	if _, err := conn.ExecContext(ctx, "XA START "+sqlXID); err != nil {
@@ -89,17 +107,48 @@ func (m *MySQL) Prepare(
 	return nil
 }
 
-func (m *MySQL) Commit(ctx context.Context, xid XID) error {
-	err := m.finish(ctx, xid, "XA COMMIT")
-	if err == nil {
+func (m *MySQL) Commit(ctx context.Context, xid XID) (err error) {
+	if err := xid.validate(); err != nil {
+		return err
+	}
+
+	conn, err := m.db.Conn(ctx)
+	if err != nil {
+		return fmt.Errorf("xa: acquire connection: %w", err)
+	}
+	defer func() {
+		err = errors.Join(err, conn.Close())
+	}()
+
+	unlock, err := acquireBranchLock(ctx, conn, xid)
+	if err != nil {
+		return err
+	}
+	defer func() {
+		err = errors.Join(err, unlock())
+	}()
+
+	aborted, err := isBranchAborted(ctx, conn, xid)
+	if err != nil {
+		return fmt.Errorf("xa: check abort barrier: %w", err)
+	}
+	if aborted {
+		return ErrBranchAborted
+	}
+
+	_, commitErr := conn.ExecContext(
+		ctx,
+		"XA COMMIT "+xid.sqlLiteral(),
+	)
+	if commitErr == nil {
 		return nil
 	}
 
-	committed, checkErr := m.Committed(ctx, xid)
+	committed, checkErr := isBranchCommitted(ctx, conn, xid)
 	if checkErr != nil {
 		return errors.Join(
-			err,
-			fmt.Errorf("xa: verify commit outcome: %w", checkErr),
+			fmt.Errorf("%w: XA COMMIT: %w", ErrOutcomeUnknown, commitErr),
+			fmt.Errorf("xa: verify commit receipt: %w", checkErr),
 		)
 	}
 
@@ -107,23 +156,64 @@ func (m *MySQL) Commit(ctx context.Context, xid XID) error {
 		return nil
 	}
 
-	return err
+	return fmt.Errorf(
+		"%w: XA COMMIT: %w",
+		ErrOutcomeUnknown,
+		commitErr,
+	)
 }
 
-func (m *MySQL) Rollback(ctx context.Context, xid XID) error {
-	return m.finish(ctx, xid, "XA ROLLBACK")
-}
-
-func (m *MySQL) finish(ctx context.Context, xid XID, command string) error {
+func (m *MySQL) Rollback(ctx context.Context, xid XID) (err error) {
 	if err := xid.validate(); err != nil {
 		return err
 	}
 
-	if _, err := m.db.ExecContext(ctx, command+" "+xid.sqlLiteral()); err != nil {
-		return fmt.Errorf("%w: %s: %w", ErrOutcomeUnknown, command, err)
+	conn, err := m.db.Conn(ctx)
+	if err != nil {
+		return fmt.Errorf("xa: acquire connection: %w", err)
+	}
+	defer func() {
+		err = errors.Join(err, conn.Close())
+	}()
+
+	unlock, err := acquireBranchLock(ctx, conn, xid)
+	if err != nil {
+		return err
+	}
+	defer func() {
+		err = errors.Join(err, unlock())
+	}()
+
+	committed, err := isBranchCommitted(ctx, conn, xid)
+	if err != nil {
+		return fmt.Errorf("xa: check commit receipt: %w", err)
+	}
+	if committed {
+		return ErrBranchCommitted
 	}
 
-	return nil
+	if err := recordAbortBarrier(ctx, conn, xid); err != nil {
+		return fmt.Errorf("xa: record abort barrier: %w", err)
+	}
+
+	_, rollbackErr := conn.ExecContext(
+		ctx,
+		"XA ROLLBACK "+xid.sqlLiteral(),
+	)
+	if rollbackErr == nil {
+		return nil
+	}
+
+	var mysqlErr *mysqldriver.MySQLError
+	if errors.As(rollbackErr, &mysqlErr) && mysqlErr.Number == 1397 {
+		return nil
+	}
+
+	return fmt.Errorf(
+		"%w: XA ROLLBACK: %w",
+		ErrOutcomeUnknown,
+		rollbackErr,
+	)
 }
 
 func (m *MySQL) Recover(ctx context.Context) ([]XID, error) {
