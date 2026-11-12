@@ -62,9 +62,14 @@ func (h *handler) Register(
 		case errors.Is(err, domain.ErrInvalidPassword),
 			errors.Is(err, app.ErrInvalidUserData):
 			return authResponse{status: http.StatusBadRequest}, nil
+
 		case errors.Is(err, app.ErrLoginAlreadyExists),
 			errors.Is(err, domain.ErrCredentialAlreadyExists):
 			return authResponse{status: http.StatusConflict}, nil
+
+		case errors.Is(err, app.ErrRegistrationPending):
+			return authResponse{status: http.StatusServiceUnavailable}, nil
+
 		default:
 			return nil, err
 		}

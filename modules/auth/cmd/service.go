@@ -101,7 +101,13 @@ func service(ctx context.Context, logger *slog.Logger, conf config.Env) (err err
 		return fmt.Errorf("create recovery worker: %w", err)
 	}
 
-	svc := app.NewService(db.unit, password.NewArgon2Hasher(), identityClient, sessionClient)
+	svc := app.NewService(
+		db.unit,
+		password.NewArgon2Hasher(),
+		identityClient,
+		sessionClient,
+		registrationCoordinator,
+	)
 
 	httpServer, err := newHTTPServer(logger, conf, svc)
 	if err != nil {

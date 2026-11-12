@@ -19,8 +19,16 @@ var (
 type Service struct {
 	unit           uow.UnitOfWorkWithRepositoryProvider[*mysql.RepositoryProvider]
 	passwordHasher domain.PasswordHasher
+	registration   RegistrationRunner
 	identity       IdentityClient
 	session        SessionClient
+}
+
+type RegistrationRunner interface {
+	Register(
+		ctx context.Context,
+		input RegisterInput,
+	) (uuid.UUID, error)
 }
 
 func NewService(
@@ -28,12 +36,14 @@ func NewService(
 	passwordHasher domain.PasswordHasher,
 	identity IdentityClient,
 	session SessionClient,
+	registration RegistrationRunner,
 ) *Service {
 	return &Service{
 		unit:           unit,
 		passwordHasher: passwordHasher,
 		identity:       identity,
 		session:        session,
+		registration:   registration,
 	}
 }
 
@@ -46,32 +56,11 @@ type RegisterInput struct {
 	Password   string
 }
 
-func (s *Service) Register(ctx context.Context, input RegisterInput) (uuid.UUID, error) {
-	if err := domain.ValidatePassword(input.Password); err != nil {
-		return uuid.Nil(), fmt.Errorf("register: validate pass: %w", err)
-	}
-
-	userID, err := s.identity.Create(
-		ctx,
-		input.FirstName,
-		input.LastName,
-		input.MiddleName,
-		input.Login,
-		input.Email,
-	)
-	if err != nil {
-		return uuid.Nil(), fmt.Errorf("register: create user: %w", err)
-	}
-
-	err = s.unit.ExecuteWithRepositoryProvider(ctx, func(provider *mysql.RepositoryProvider) error {
-		svc := domain.NewAuthService(provider.Auth(ctx), s.passwordHasher)
-		return svc.Create(userID, input.Login, input.Password)
-	})
-	if err != nil {
-		return uuid.Nil(), fmt.Errorf("register: create auth cred: %w", err)
-	}
-
-	return userID, nil
+func (s *Service) Register(
+	ctx context.Context,
+	input RegisterInput,
+) (uuid.UUID, error) {
+	return s.registration.Register(ctx, input)
 }
 
 func (s *Service) Login(ctx context.Context, login, password string) (string, error) {
