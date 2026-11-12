@@ -7,6 +7,8 @@ import (
 	"fmt"
 	"uuid"
 
+	mysqldriver "github.com/go-sql-driver/mysql"
+
 	"auth/internal/auth/domain"
 )
 
@@ -47,6 +49,16 @@ VALUES (?, ?, ?)
 `, userID.String(), credential.Login(), credential.PasswordHash())
 
 	if err != nil {
+		var mysqlErr *mysqldriver.MySQLError
+
+		if errors.As(err, &mysqlErr) && mysqlErr.Number == 1062 {
+			return fmt.Errorf(
+				"store password credential: %w: %w",
+				domain.ErrCredentialAlreadyExists,
+				err,
+			)
+		}
+
 		return fmt.Errorf("store password credential: %w", err)
 	}
 

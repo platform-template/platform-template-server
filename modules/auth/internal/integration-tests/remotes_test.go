@@ -89,14 +89,126 @@ func (r *remoteServices) Close() error {
 	return nil
 }
 
+type preparedIdentity struct {
+	userID string
+	login  string
+}
+
 type identityMock struct {
 	identityapi.UnimplementedIdentityServiceServer
-	mu    sync.Mutex
-	users map[string]string
+
+	mu        sync.Mutex
+	users     map[string]string
+	prepared  map[string]preparedIdentity
+	committed map[string]struct{}
+	aborted   map[string]struct{}
 }
 
 func newIdentityMock() *identityMock {
-	return &identityMock{users: make(map[string]string)}
+	return &identityMock{
+		users:     make(map[string]string),
+		prepared:  make(map[string]preparedIdentity),
+		committed: make(map[string]struct{}),
+		aborted:   make(map[string]struct{}),
+	}
+}
+
+func (s *identityMock) PrepareRegistration(
+	_ context.Context,
+	req *identityapi.PrepareRegistrationRequest,
+) (*identityapi.RegistrationTransactionResponse, error) {
+	if strings.TrimSpace(req.GetFirstName()) == "" ||
+		strings.TrimSpace(req.GetLastName()) == "" ||
+		strings.TrimSpace(req.GetLogin()) == "" ||
+		!strings.Contains(req.GetEmail(), "@") {
+		return nil, status.Error(codes.InvalidArgument, "invalid user data")
+	}
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	txID := req.GetTransactionId()
+	login := req.GetLogin()
+
+	if _, ok := s.aborted[txID]; ok {
+		return nil, status.Error(codes.FailedPrecondition, "transaction aborted")
+	}
+
+	if _, ok := s.committed[txID]; ok {
+		return &identityapi.RegistrationTransactionResponse{}, nil
+	}
+
+	if prepared, ok := s.prepared[txID]; ok {
+		if prepared.login != login || prepared.userID != req.GetUserId() {
+			return nil, status.Error(codes.FailedPrecondition, "transaction mismatch")
+		}
+		return &identityapi.RegistrationTransactionResponse{}, nil
+	}
+
+	if _, exists := s.users[login]; exists {
+		return nil, status.Error(codes.AlreadyExists, "login already exists")
+	}
+
+	for _, prepared := range s.prepared {
+		if prepared.login == login {
+			return nil, status.Error(codes.AlreadyExists, "login already exists")
+		}
+	}
+
+	s.prepared[txID] = preparedIdentity{
+		userID: req.GetUserId(),
+		login:  login,
+	}
+
+	return &identityapi.RegistrationTransactionResponse{}, nil
+}
+
+func (s *identityMock) CommitRegistration(
+	_ context.Context,
+	req *identityapi.RegistrationTransactionRequest,
+) (*identityapi.RegistrationTransactionResponse, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	txID := req.GetTransactionId()
+
+	if _, ok := s.committed[txID]; ok {
+		return &identityapi.RegistrationTransactionResponse{}, nil
+	}
+
+	if _, ok := s.aborted[txID]; ok {
+		return nil, status.Error(codes.FailedPrecondition, "transaction aborted")
+	}
+
+	prepared, exists := s.prepared[txID]
+	if !exists {
+		return nil, status.Error(codes.NotFound, "transaction not prepared")
+	}
+
+	s.users[prepared.login] = prepared.userID
+	delete(s.prepared, txID)
+	s.committed[txID] = struct{}{}
+
+	return &identityapi.RegistrationTransactionResponse{}, nil
+}
+
+func (s *identityMock) RollbackRegistration(
+	_ context.Context,
+	req *identityapi.RegistrationTransactionRequest,
+) (*identityapi.RegistrationTransactionResponse, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	txID := req.GetTransactionId()
+
+	if _, ok := s.committed[txID]; ok {
+		return nil, status.Error(codes.FailedPrecondition, "transaction committed")
+	}
+
+	delete(s.prepared, txID)
+	s.aborted[txID] = struct{}{}
+
+	return &identityapi.RegistrationTransactionResponse{}, nil
 }
 
 func (s *identityMock) CreateUser(

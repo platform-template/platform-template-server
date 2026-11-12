@@ -198,6 +198,7 @@ func TestRegistrationCoordinator(t *testing.T) {
 		authPrepareErr     error
 		identityPrepareErr error
 		identityCommitErr  error
+		authCommitErr      error
 		authRollbackErr    error
 		decideCommitErr    error
 		decideAbortErr     error
@@ -214,8 +215,8 @@ func TestRegistrationCoordinator(t *testing.T) {
 				"auth.prepare",
 				"identity.prepare",
 				"journal.decide_commit",
-				"auth.commit",
 				"identity.commit",
+				"auth.commit",
 				"journal.mark_committed",
 				"lease.release",
 			},
@@ -247,8 +248,23 @@ func TestRegistrationCoordinator(t *testing.T) {
 				"auth.prepare",
 				"identity.prepare",
 				"journal.decide_commit",
-				"auth.commit",
 				"identity.commit",
+				"lease.release",
+			},
+		},
+		{
+			name:          "auth commit failed after identity commit",
+			authCommitErr: failure,
+			wantState:     RegistrationCommitDecided,
+			wantError:     true,
+			wantPending:   true,
+			wantCalls: []string{
+				"lease.begin",
+				"auth.prepare",
+				"identity.prepare",
+				"journal.decide_commit",
+				"identity.commit",
+				"auth.commit",
 				"lease.release",
 			},
 		},
@@ -315,6 +331,7 @@ func TestRegistrationCoordinator(t *testing.T) {
 					name:        "auth",
 					calls:       &calls,
 					prepareErr:  tt.authPrepareErr,
+					commitErr:   tt.authCommitErr,
 					rollbackErr: tt.authRollbackErr,
 				},
 			}

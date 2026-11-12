@@ -87,6 +87,7 @@ func TestXARegistration(t *testing.T) {
 			"xa-commit-"+userID.String(),
 			"secure-password",
 		)
+		require.NoError(t, err)
 		resource, err := xa.NewMySQL(db)
 		require.NoError(t, err)
 

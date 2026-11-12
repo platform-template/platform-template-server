@@ -8,6 +8,9 @@ import (
 	identityapi "identity/api/server/internalapi"
 
 	"auth/internal/auth/app"
+
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 )
 
 var _ app.RegistrationIdentityClient = (*Client)(nil)
@@ -31,9 +34,23 @@ func (c *Client) Prepare(
 		},
 	)
 	if err != nil {
-		return fmt.Errorf("identity: prepare registration: %w", err)
-	}
+		switch status.Code(err) {
+		case codes.AlreadyExists:
+			return fmt.Errorf(
+				"identity: prepare registration: %w",
+				app.ErrLoginAlreadyExists,
+			)
 
+		case codes.InvalidArgument:
+			return fmt.Errorf(
+				"identity: prepare registration: %w",
+				app.ErrInvalidUserData,
+			)
+
+		default:
+			return fmt.Errorf("identity: prepare registration: %w", err)
+		}
+	}
 	return nil
 }
 

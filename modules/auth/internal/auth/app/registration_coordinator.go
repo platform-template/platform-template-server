@@ -127,12 +127,17 @@ func (c *RegistrationCoordinator) commit(
 	)
 	defer cancel()
 
-	authErr := c.auth.Commit(settleCtx, lease.TransactionID)
-	identityErr := c.identity.Commit(settleCtx, lease.TransactionID)
-
-	if err := errors.Join(authErr, identityErr); err != nil {
+	if err := c.identity.Commit(settleCtx, lease.TransactionID); err != nil {
 		return fmt.Errorf(
-			"%w: commit participants: %w",
+			"%w: commit identity: %w",
+			ErrRegistrationPending,
+			err,
+		)
+	}
+
+	if err := c.auth.Commit(settleCtx, lease.TransactionID); err != nil {
+		return fmt.Errorf(
+			"%w: commit auth: %w",
 			ErrRegistrationPending,
 			err,
 		)

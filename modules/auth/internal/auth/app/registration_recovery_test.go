@@ -15,6 +15,7 @@ func TestRecoverPending(t *testing.T) {
 		name                string
 		state               RegistrationState
 		identityCommitErr   error
+		authCommitErr       error
 		wantState           RegistrationState
 		wantErr             bool
 		wantCalls           []string
@@ -27,8 +28,8 @@ func TestRecoverPending(t *testing.T) {
 			wantState: RegistrationCommitted,
 			wantCalls: []string{
 				"lease.acquire",
-				"auth.commit",
 				"identity.commit",
+				"auth.commit",
 				"journal.mark_committed",
 				"lease.release",
 			},
@@ -41,8 +42,20 @@ func TestRecoverPending(t *testing.T) {
 			wantErr:           true,
 			wantCalls: []string{
 				"lease.acquire",
-				"auth.commit",
 				"identity.commit",
+				"lease.release",
+			},
+		},
+		{
+			name:          "auth commit still fails after identity commit",
+			state:         RegistrationCommitDecided,
+			authCommitErr: failure,
+			wantState:     RegistrationCommitDecided,
+			wantErr:       true,
+			wantCalls: []string{
+				"lease.acquire",
+				"identity.commit",
+				"auth.commit",
 				"lease.release",
 			},
 		},
@@ -109,6 +122,7 @@ func TestRecoverPending(t *testing.T) {
 				coordinatorBranchMock: &coordinatorBranchMock{
 					name:        "auth",
 					calls:       &calls,
+					commitErr:   tt.authCommitErr,
 					rollbackErr: tt.authRollbackErr,
 				},
 			}
