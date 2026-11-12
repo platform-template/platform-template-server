@@ -8,6 +8,9 @@ import (
 	"testing"
 	"time"
 
+	"auth/internal/auth/app"
+	identityapi "identity/api/server/internalapi"
+
 	"github.com/stretchr/testify/require"
 )
 
@@ -146,6 +149,39 @@ func TestAuthHTTPRegisterAndLogin(t *testing.T) {
 SELECT password_hash FROM password_credentials WHERE user_id = ?`, userID)
 	require.NoError(t, err)
 	require.NotEmpty(t, passwordHash)
+
+	var storedLogin string
+
+	err = testEnv.connector.TransactionalClient().GetContext(
+		t.Context(),
+		"test.auth.registration.login",
+		&storedLogin,
+		`SELECT login FROM password_credentials WHERE user_id = ?`,
+		userID,
+	)
+	require.NoError(t, err)
+	require.Equal(t, testUsers.register.login, storedLogin)
+
+	identityResponse, err := testEnv.remotes.identity.FindUserByLogin(
+		t.Context(),
+		&identityapi.FindUserByLoginRequest{
+			Login: testUsers.register.login,
+		},
+	)
+	require.NoError(t, err)
+	require.Equal(t, userID, identityResponse.GetUserId())
+
+	var state string
+
+	err = testEnv.connector.TransactionalClient().GetContext(
+		t.Context(),
+		"test.auth.registration.state",
+		&state,
+		`SELECT state FROM registration_transactions WHERE user_id = ?`,
+		userID,
+	)
+	require.NoError(t, err)
+	require.Equal(t, string(app.RegistrationCommitted), state)
 
 	duplicate := testUsers.register
 	duplicate.email = "second@example.com"
