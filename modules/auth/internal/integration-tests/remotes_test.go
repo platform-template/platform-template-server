@@ -18,16 +18,17 @@ import (
 )
 
 type remoteServices struct {
-	identityAddress  string
-	sessionAddress   string
-	identityPort     int
-	sessionPort      int
-	identity         *identityMock
-	session          *sessionMock
-	identityServer   *grpc.Server
-	sessionServer    *grpc.Server
-	identityListener net.Listener
-	sessionListener  net.Listener
+	identityAddress    string
+	sessionAddress     string
+	identityPort       int
+	sessionPort        int
+	identity           *identityMock
+	session            *sessionMock
+	identityServer     *grpc.Server
+	sessionServer      *grpc.Server
+	identityListener   net.Listener
+	sessionListener    net.Listener
+	registrationFaults *identityRPCFaults
 }
 
 func startRemoteServices() (*remoteServices, error) {
@@ -55,16 +56,19 @@ func startRemoteServices() (*remoteServices, error) {
 	}
 
 	remotes := &remoteServices{
-		identityAddress:  fmt.Sprintf("host.testcontainers.internal:%d", identityPort),
-		sessionAddress:   fmt.Sprintf("host.testcontainers.internal:%d", sessionPort),
-		identityPort:     identityPort,
-		sessionPort:      sessionPort,
-		identity:         newIdentityMock(),
-		session:          newSessionMock(),
-		identityListener: identityListener,
-		sessionListener:  sessionListener,
+		identityAddress:    fmt.Sprintf("host.testcontainers.internal:%d", identityPort),
+		sessionAddress:     fmt.Sprintf("host.testcontainers.internal:%d", sessionPort),
+		identityPort:       identityPort,
+		sessionPort:        sessionPort,
+		identity:           newIdentityMock(),
+		session:            newSessionMock(),
+		identityListener:   identityListener,
+		sessionListener:    sessionListener,
+		registrationFaults: &identityRPCFaults{},
 	}
-	remotes.identityServer = grpc.NewServer()
+	remotes.identityServer = grpc.NewServer(
+		grpc.UnaryInterceptor(remotes.registrationFaults.intercept),
+	)
 	identityapi.RegisterIdentityServiceServer(remotes.identityServer, remotes.identity)
 	remotes.sessionServer = grpc.NewServer()
 	sessionapi.RegisterSessionServiceServer(remotes.sessionServer, remotes.session)
@@ -92,6 +96,73 @@ func (r *remoteServices) Close() error {
 type preparedIdentity struct {
 	userID string
 	login  string
+}
+
+type identityRPCFaults struct {
+	mu sync.Mutex
+
+	failPrepare bool
+	failCommit  bool
+
+	prepareCalls int
+}
+
+func (f *identityRPCFaults) intercept(
+	ctx context.Context,
+	req any,
+	info *grpc.UnaryServerInfo,
+	handler grpc.UnaryHandler,
+) (any, error) {
+	f.mu.Lock()
+
+	var fail bool
+
+	switch {
+	case strings.HasSuffix(info.FullMethod, "/PrepareRegistration"):
+		f.prepareCalls++
+		fail = f.failPrepare
+		f.failPrepare = false
+
+	case strings.HasSuffix(info.FullMethod, "/CommitRegistration"):
+		fail = f.failCommit
+		f.failCommit = false
+	}
+
+	f.mu.Unlock()
+
+	if fail {
+		return nil, status.Error(
+			codes.Unavailable,
+			"injected registration failure",
+		)
+	}
+
+	return handler(ctx, req)
+}
+
+func (f *identityRPCFaults) failNextPrepare() {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.failPrepare = true
+}
+
+func (f *identityRPCFaults) failNextCommit() {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.failCommit = true
+}
+
+func (f *identityRPCFaults) prepareCount() int {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.prepareCalls
+}
+
+func (f *identityRPCFaults) reset() {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.failPrepare = false
+	f.failCommit = false
 }
 
 type identityMock struct {
