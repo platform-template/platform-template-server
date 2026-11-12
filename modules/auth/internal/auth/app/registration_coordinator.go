@@ -29,17 +29,20 @@ type RegistrationAuthParticipant interface {
 
 type RegistrationCoordinator struct {
 	journal  RegistrationJournal
+	leases   RegistrationLeaseStore
 	auth     RegistrationAuthParticipant
 	identity RegistrationIdentityClient
 }
 
 func NewRegistrationCoordinator(
 	journal RegistrationJournal,
+	leases RegistrationLeaseStore,
 	auth RegistrationAuthParticipant,
 	identity RegistrationIdentityClient,
 ) *RegistrationCoordinator {
 	return &RegistrationCoordinator{
 		journal:  journal,
+		leases:   leases,
 		auth:     auth,
 		identity: identity,
 	}
@@ -58,57 +61,65 @@ func (c *RegistrationCoordinator) Register(
 	transactionID := uuid.New()
 	userID := uuid.New()
 
-	if err := c.journal.Begin(ctx, transactionID, userID); err != nil {
+	lease, err := c.leases.Begin(
+		ctx,
+		transactionID,
+		userID,
+		registrationLeaseTTL,
+	)
+	if err != nil {
 		return uuid.Nil(), fmt.Errorf(
 			"register: begin transaction: %w", err,
 		)
 	}
 
-	if err := c.auth.Prepare(
-		ctx,
-		transactionID,
-		userID,
-		input.Login,
-		input.Password,
-	); err != nil {
-		return userID, c.abort(
+	err = c.withLease(ctx, lease, func(ctx context.Context) error {
+		if err := c.auth.Prepare(
 			ctx,
 			transactionID,
-			fmt.Errorf("register: prepare auth: %w", err),
-		)
-	}
+			userID,
+			input.Login,
+			input.Password,
+		); err != nil {
+			return c.abort(
+				ctx, lease,
+				fmt.Errorf("register: prepare auth: %w", err),
+			)
+		}
 
-	if err := c.identity.Prepare(
-		ctx,
-		transactionID,
-		userID,
-		input.FirstName,
-		input.LastName,
-		input.MiddleName,
-		input.Login,
-		input.Email,
-	); err != nil {
-		return userID, c.abort(
+		if err := c.identity.Prepare(
 			ctx,
 			transactionID,
-			fmt.Errorf("register: prepare identity: %w", err),
-		)
-	}
+			userID,
+			input.FirstName,
+			input.LastName,
+			input.MiddleName,
+			input.Login,
+			input.Email,
+		); err != nil {
+			return c.abort(
+				ctx, lease,
+				fmt.Errorf("register: prepare identity: %w", err),
+			)
+		}
 
-	if err := c.journal.DecideCommit(ctx, transactionID); err != nil {
-		return userID, fmt.Errorf(
-			"%w: persist COMMIT decision: %w",
-			ErrRegistrationPending,
-			err,
-		)
-	}
+		if err := c.journal.DecideCommit(ctx, lease); err != nil {
+			return fmt.Errorf(
+				"%w: persist COMMIT decision: %w",
+				ErrRegistrationPending,
+				err,
+			)
+		}
 
-	return userID, c.commit(ctx, transactionID)
+		return c.commit(ctx, lease)
+	})
+
+	return userID, err
 }
 
 func (c *RegistrationCoordinator) commit(
 	ctx context.Context,
-	transactionID uuid.UUID,
+	lease RegistrationLease,
 ) error {
 	settleCtx, cancel := context.WithTimeout(
 		context.WithoutCancel(ctx),
@@ -116,8 +127,8 @@ func (c *RegistrationCoordinator) commit(
 	)
 	defer cancel()
 
-	authErr := c.auth.Commit(settleCtx, transactionID)
-	identityErr := c.identity.Commit(settleCtx, transactionID)
+	authErr := c.auth.Commit(settleCtx, lease.TransactionID)
+	identityErr := c.identity.Commit(settleCtx, lease.TransactionID)
 
 	if err := errors.Join(authErr, identityErr); err != nil {
 		return fmt.Errorf(
@@ -127,7 +138,7 @@ func (c *RegistrationCoordinator) commit(
 		)
 	}
 
-	if err := c.journal.MarkCommitted(settleCtx, transactionID); err != nil {
+	if err := c.journal.MarkCommitted(settleCtx, lease); err != nil {
 		return fmt.Errorf(
 			"%w: mark committed: %w",
 			ErrRegistrationPending,
@@ -140,7 +151,7 @@ func (c *RegistrationCoordinator) commit(
 
 func (c *RegistrationCoordinator) abort(
 	ctx context.Context,
-	transactionID uuid.UUID,
+	lease RegistrationLease,
 	cause error,
 ) error {
 	settleCtx, cancel := context.WithTimeout(
@@ -149,7 +160,7 @@ func (c *RegistrationCoordinator) abort(
 	)
 	defer cancel()
 
-	if err := c.journal.DecideAbort(settleCtx, transactionID); err != nil {
+	if err := c.journal.DecideAbort(settleCtx, lease); err != nil {
 		return errors.Join(
 			cause,
 			fmt.Errorf(
@@ -160,8 +171,8 @@ func (c *RegistrationCoordinator) abort(
 		)
 	}
 
-	authErr := c.auth.Rollback(settleCtx, transactionID)
-	identityErr := c.identity.Rollback(settleCtx, transactionID)
+	authErr := c.auth.Rollback(settleCtx, lease.TransactionID)
+	identityErr := c.identity.Rollback(settleCtx, lease.TransactionID)
 
 	if err := errors.Join(authErr, identityErr); err != nil {
 		return errors.Join(
@@ -174,7 +185,7 @@ func (c *RegistrationCoordinator) abort(
 		)
 	}
 
-	if err := c.journal.MarkAborted(settleCtx, transactionID); err != nil {
+	if err := c.journal.MarkAborted(settleCtx, lease); err != nil {
 		return errors.Join(
 			cause,
 			fmt.Errorf(

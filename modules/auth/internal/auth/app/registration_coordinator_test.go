@@ -5,6 +5,7 @@ import (
 	"errors"
 	"slices"
 	"testing"
+	"time"
 	"uuid"
 )
 
@@ -21,16 +22,8 @@ func (m *coordinatorJournalMock) record(action string) {
 	*m.calls = append(*m.calls, "journal."+action)
 }
 
-func (m *coordinatorJournalMock) Begin(
-	_ context.Context, _, _ uuid.UUID,
-) error {
-	m.record("begin")
-	m.state = RegistrationPreparing
-	return nil
-}
-
 func (m *coordinatorJournalMock) DecideCommit(
-	_ context.Context, _ uuid.UUID,
+	_ context.Context, _ RegistrationLease,
 ) error {
 	m.record("decide_commit")
 	if m.decideCommitErr != nil {
@@ -41,7 +34,7 @@ func (m *coordinatorJournalMock) DecideCommit(
 }
 
 func (m *coordinatorJournalMock) DecideAbort(
-	_ context.Context, _ uuid.UUID,
+	_ context.Context, _ RegistrationLease,
 ) error {
 	m.record("decide_abort")
 	if m.decideAbortErr != nil {
@@ -52,7 +45,7 @@ func (m *coordinatorJournalMock) DecideAbort(
 }
 
 func (m *coordinatorJournalMock) MarkCommitted(
-	_ context.Context, _ uuid.UUID,
+	_ context.Context, _ RegistrationLease,
 ) error {
 	m.record("mark_committed")
 	m.state = RegistrationCommitted
@@ -60,7 +53,7 @@ func (m *coordinatorJournalMock) MarkCommitted(
 }
 
 func (m *coordinatorJournalMock) MarkAborted(
-	_ context.Context, _ uuid.UUID,
+	_ context.Context, _ RegistrationLease,
 ) error {
 	m.record("mark_aborted")
 	m.state = RegistrationAborted
@@ -81,6 +74,65 @@ func (f *coordinatorJournalMock) ListPending(
 	}
 
 	return f.pending, nil
+}
+
+type coordinatorLeaseMock struct {
+	journal        *coordinatorJournalMock
+	calls          *[]string
+	acquireAllowed bool
+}
+
+func (m *coordinatorLeaseMock) record(action string) {
+	*m.calls = append(*m.calls, "lease."+action)
+}
+
+func (m *coordinatorLeaseMock) Begin(
+	_ context.Context,
+	transactionID, _ uuid.UUID,
+	_ time.Duration,
+) (RegistrationLease, error) {
+	m.record("begin")
+	m.journal.state = RegistrationPreparing
+
+	return RegistrationLease{
+		TransactionID: transactionID,
+		OwnerID:       uuid.New(),
+		Epoch:         1,
+	}, nil
+}
+
+func (m *coordinatorLeaseMock) Acquire(
+	_ context.Context,
+	transactionID uuid.UUID,
+	_ time.Duration,
+) (RegistrationLease, bool, error) {
+	m.record("acquire")
+
+	if !m.acquireAllowed {
+		return RegistrationLease{}, false, nil
+	}
+
+	return RegistrationLease{
+		TransactionID: transactionID,
+		OwnerID:       uuid.New(),
+		Epoch:         2,
+	}, true, nil
+}
+
+func (m *coordinatorLeaseMock) Renew(
+	_ context.Context,
+	_ RegistrationLease,
+	_ time.Duration,
+) (bool, error) {
+	return true, nil
+}
+
+func (m *coordinatorLeaseMock) Release(
+	_ context.Context,
+	_ RegistrationLease,
+) (bool, error) {
+	m.record("release")
+	return true, nil
 }
 
 type coordinatorBranchMock struct {
@@ -158,13 +210,14 @@ func TestRegistrationCoordinator(t *testing.T) {
 			name:      "successful registration",
 			wantState: RegistrationCommitted,
 			wantCalls: []string{
-				"journal.begin",
+				"lease.begin",
 				"auth.prepare",
 				"identity.prepare",
 				"journal.decide_commit",
 				"auth.commit",
 				"identity.commit",
 				"journal.mark_committed",
+				"lease.release",
 			},
 		},
 		{
@@ -173,13 +226,14 @@ func TestRegistrationCoordinator(t *testing.T) {
 			wantState:          RegistrationAborted,
 			wantError:          true,
 			wantCalls: []string{
-				"journal.begin",
+				"lease.begin",
 				"auth.prepare",
 				"identity.prepare",
 				"journal.decide_abort",
 				"auth.rollback",
 				"identity.rollback",
 				"journal.mark_aborted",
+				"lease.release",
 			},
 		},
 		{
@@ -189,12 +243,13 @@ func TestRegistrationCoordinator(t *testing.T) {
 			wantError:         true,
 			wantPending:       true,
 			wantCalls: []string{
-				"journal.begin",
+				"lease.begin",
 				"auth.prepare",
 				"identity.prepare",
 				"journal.decide_commit",
 				"auth.commit",
 				"identity.commit",
+				"lease.release",
 			},
 		},
 		{
@@ -204,10 +259,11 @@ func TestRegistrationCoordinator(t *testing.T) {
 			wantError:       true,
 			wantPending:     true,
 			wantCalls: []string{
-				"journal.begin",
+				"lease.begin",
 				"auth.prepare",
 				"identity.prepare",
 				"journal.decide_commit",
+				"lease.release",
 			},
 		},
 		{
@@ -218,10 +274,11 @@ func TestRegistrationCoordinator(t *testing.T) {
 			wantError:          true,
 			wantPending:        true,
 			wantCalls: []string{
-				"journal.begin",
+				"lease.begin",
 				"auth.prepare",
 				"identity.prepare",
 				"journal.decide_abort",
+				"lease.release",
 			},
 		},
 		{
@@ -232,12 +289,13 @@ func TestRegistrationCoordinator(t *testing.T) {
 			wantError:          true,
 			wantPending:        true,
 			wantCalls: []string{
-				"journal.begin",
+				"lease.begin",
 				"auth.prepare",
 				"identity.prepare",
 				"journal.decide_abort",
 				"auth.rollback",
 				"identity.rollback",
+				"lease.release",
 			},
 		},
 	}
@@ -270,8 +328,15 @@ func TestRegistrationCoordinator(t *testing.T) {
 				},
 			}
 
+			leases := &coordinatorLeaseMock{
+				journal:        journal,
+				calls:          &calls,
+				acquireAllowed: true,
+			}
+
 			coordinator := NewRegistrationCoordinator(
 				journal,
+				leases,
 				auth,
 				identity,
 			)

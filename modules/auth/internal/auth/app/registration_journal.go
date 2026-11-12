@@ -28,14 +28,18 @@ type RegistrationTransaction struct {
 }
 
 type RegistrationJournal interface {
-	Begin(ctx context.Context, transactionID, userID uuid.UUID) error
+	DecideCommit(ctx context.Context, lease RegistrationLease) error
+	DecideAbort(ctx context.Context, lease RegistrationLease) error
 
-	DecideCommit(ctx context.Context, transactionID uuid.UUID) error
-	DecideAbort(ctx context.Context, transactionID uuid.UUID) error
+	MarkCommitted(ctx context.Context, lease RegistrationLease) error
+	MarkAborted(ctx context.Context, lease RegistrationLease) error
 
-	MarkCommitted(ctx context.Context, transactionID uuid.UUID) error
-	MarkAborted(ctx context.Context, transactionID uuid.UUID) error
+	Get(
+		ctx context.Context,
+		transactionID uuid.UUID,
+	) (RegistrationTransaction, error)
 
-	Get(ctx context.Context, transactionID uuid.UUID) (RegistrationTransaction, error)
-	ListPending(ctx context.Context) ([]RegistrationTransaction, error)
+	ListPending(
+		ctx context.Context,
+	) ([]RegistrationTransaction, error)
 }

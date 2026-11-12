@@ -20,40 +20,12 @@ func NewRegistrationJournal(db *sql.DB) *RegistrationJournal {
 	return &RegistrationJournal{db: db}
 }
 
-func (j *RegistrationJournal) Begin(
-	ctx context.Context,
-	transactionID, userID uuid.UUID,
-) error {
-	if transactionID == uuid.Nil() || userID == uuid.Nil() {
-		return errors.New("registration journal: nil UUID")
-	}
-
-	_, err := j.db.ExecContext(ctx, `
-INSERT INTO registration_transactions (
-    transaction_id,
-    user_id,
-    state
-)
-VALUES (?, ?, ?)
-`,
-		transactionID.String(),
-		userID.String(),
-		string(app.RegistrationPreparing),
-	)
-	if err != nil {
-		return fmt.Errorf("registration journal: begin: %w", err)
-	}
-
-	return nil
-}
-
 func (j *RegistrationJournal) DecideCommit(
 	ctx context.Context,
-	transactionID uuid.UUID,
+	lease app.RegistrationLease,
 ) error {
-	return j.transition(
-		ctx,
-		transactionID,
+	return transitionOwned(
+		ctx, j.db, lease,
 		app.RegistrationPreparing,
 		app.RegistrationCommitDecided,
 	)
@@ -61,11 +33,10 @@ func (j *RegistrationJournal) DecideCommit(
 
 func (j *RegistrationJournal) DecideAbort(
 	ctx context.Context,
-	transactionID uuid.UUID,
+	lease app.RegistrationLease,
 ) error {
-	return j.transition(
-		ctx,
-		transactionID,
+	return transitionOwned(
+		ctx, j.db, lease,
 		app.RegistrationPreparing,
 		app.RegistrationAbortDecided,
 	)
@@ -73,11 +44,10 @@ func (j *RegistrationJournal) DecideAbort(
 
 func (j *RegistrationJournal) MarkCommitted(
 	ctx context.Context,
-	transactionID uuid.UUID,
+	lease app.RegistrationLease,
 ) error {
-	return j.transition(
-		ctx,
-		transactionID,
+	return transitionOwned(
+		ctx, j.db, lease,
 		app.RegistrationCommitDecided,
 		app.RegistrationCommitted,
 	)
@@ -85,11 +55,10 @@ func (j *RegistrationJournal) MarkCommitted(
 
 func (j *RegistrationJournal) MarkAborted(
 	ctx context.Context,
-	transactionID uuid.UUID,
+	lease app.RegistrationLease,
 ) error {
-	return j.transition(
-		ctx,
-		transactionID,
+	return transitionOwned(
+		ctx, j.db, lease,
 		app.RegistrationAbortDecided,
 		app.RegistrationAborted,
 	)
@@ -232,4 +201,43 @@ ORDER BY created_at, transaction_id
 	}
 
 	return transactions, nil
+}
+
+func transitionOwned(
+	ctx context.Context,
+	db *sql.DB,
+	lease app.RegistrationLease,
+	from, to app.RegistrationState,
+) error {
+	result, err := db.ExecContext(ctx, `
+UPDATE registration_transactions
+SET state = ?
+WHERE transaction_id = ?
+  AND state = ?
+  AND lease_owner = ?
+  AND lease_epoch = ?
+  AND lease_until > UTC_TIMESTAMP(6)
+`,
+		string(to),
+		lease.TransactionID.String(),
+		string(from),
+		lease.OwnerID.String(),
+		lease.Epoch,
+	)
+	if err != nil {
+		return fmt.Errorf(
+			"transition registration %s from %s to %s: %w",
+			lease.TransactionID, from, to, err,
+		)
+	}
+
+	affected, err := result.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("registration transition rows affected: %w", err)
+	}
+	if affected != 1 {
+		return app.ErrRegistrationStateConflict
+	}
+
+	return nil
 }

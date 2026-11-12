@@ -26,9 +26,11 @@ func TestRecoverPending(t *testing.T) {
 			state:     RegistrationCommitDecided,
 			wantState: RegistrationCommitted,
 			wantCalls: []string{
+				"lease.acquire",
 				"auth.commit",
 				"identity.commit",
 				"journal.mark_committed",
+				"lease.release",
 			},
 		},
 		{
@@ -38,8 +40,10 @@ func TestRecoverPending(t *testing.T) {
 			wantState:         RegistrationCommitDecided,
 			wantErr:           true,
 			wantCalls: []string{
+				"lease.acquire",
 				"auth.commit",
 				"identity.commit",
+				"lease.release",
 			},
 		},
 		{
@@ -47,10 +51,12 @@ func TestRecoverPending(t *testing.T) {
 			state:     RegistrationPreparing,
 			wantState: RegistrationAborted,
 			wantCalls: []string{
+				"lease.acquire",
 				"journal.decide_abort",
 				"auth.rollback",
 				"identity.rollback",
 				"journal.mark_aborted",
+				"lease.release",
 			},
 		},
 		{
@@ -58,9 +64,11 @@ func TestRecoverPending(t *testing.T) {
 			state:     RegistrationAbortDecided,
 			wantState: RegistrationAborted,
 			wantCalls: []string{
+				"lease.acquire",
 				"auth.rollback",
 				"identity.rollback",
 				"journal.mark_aborted",
+				"lease.release",
 			},
 		},
 		{
@@ -70,8 +78,10 @@ func TestRecoverPending(t *testing.T) {
 			wantState:           RegistrationAbortDecided,
 			wantErr:             true,
 			wantCalls: []string{
+				"lease.acquire",
 				"auth.rollback",
 				"identity.rollback",
+				"lease.release",
 			},
 		},
 	}
@@ -112,8 +122,15 @@ func TestRecoverPending(t *testing.T) {
 				},
 			}
 
+			leases := &coordinatorLeaseMock{
+				journal:        journal,
+				calls:          &calls,
+				acquireAllowed: true,
+			}
+
 			coordinator := NewRegistrationCoordinator(
 				journal,
+				leases,
 				auth,
 				identity,
 			)
@@ -156,6 +173,7 @@ func TestRecoverPendingJournalError(t *testing.T) {
 		journal,
 		nil,
 		nil,
+		nil,
 	)
 
 	err := coordinator.RecoverPending(t.Context())
@@ -167,13 +185,15 @@ func TestRecoverPendingJournalError(t *testing.T) {
 
 type failingRecoveryAbortJournal struct {
 	RegistrationJournal
-	err error
+	err   error
+	calls *[]string
 }
 
 func (j *failingRecoveryAbortJournal) DecideAbort(
 	_ context.Context,
-	_ uuid.UUID,
+	_ RegistrationLease,
 ) error {
+	*j.calls = append(*j.calls, "journal.decide_abort")
 	return j.err
 }
 
@@ -199,6 +219,13 @@ func TestRecoverPendingAbortDecisionFailure(t *testing.T) {
 	journal := &failingRecoveryAbortJournal{
 		RegistrationJournal: baseJournal,
 		err:                 failure,
+		calls:               &calls,
+	}
+
+	leases := &coordinatorLeaseMock{
+		journal:        baseJournal,
+		calls:          &calls,
+		acquireAllowed: true,
 	}
 
 	auth := &coordinatorAuthMock{
@@ -217,6 +244,7 @@ func TestRecoverPendingAbortDecisionFailure(t *testing.T) {
 
 	coordinator := NewRegistrationCoordinator(
 		journal,
+		leases,
 		auth,
 		identity,
 	)
@@ -239,7 +267,85 @@ func TestRecoverPendingAbortDecisionFailure(t *testing.T) {
 		)
 	}
 
-	if len(calls) != 0 {
-		t.Errorf("unexpected participant calls: %v", calls)
+	wantCalls := []string{
+		"lease.acquire",
+		"journal.decide_abort",
+		"lease.release",
+	}
+
+	if !slices.Equal(calls, wantCalls) {
+		t.Errorf(
+			"calls: got %v, want %v",
+			calls,
+			wantCalls,
+		)
+	}
+}
+
+func TestRecoverPendingSkipsActiveTransaction(t *testing.T) {
+	var calls []string
+
+	transactionID := uuid.New()
+
+	journal := &coordinatorJournalMock{
+		calls: &calls,
+		state: RegistrationPreparing,
+		pending: []RegistrationTransaction{
+			{
+				TransactionID: transactionID,
+				UserID:        uuid.New(),
+				State:         RegistrationPreparing,
+			},
+		},
+	}
+
+	leases := &coordinatorLeaseMock{
+		journal:        journal,
+		calls:          &calls,
+		acquireAllowed: false,
+	}
+
+	auth := &coordinatorAuthMock{
+		coordinatorBranchMock: &coordinatorBranchMock{
+			name:  "auth",
+			calls: &calls,
+		},
+	}
+
+	identity := &coordinatorIdentityMock{
+		coordinatorBranchMock: &coordinatorBranchMock{
+			name:  "identity",
+			calls: &calls,
+		},
+	}
+
+	coordinator := NewRegistrationCoordinator(
+		journal,
+		leases,
+		auth,
+		identity,
+	)
+
+	err := coordinator.RecoverPending(t.Context())
+	if err != nil {
+		t.Fatalf("unexpected recovery error: %v", err)
+	}
+
+	if journal.state != RegistrationPreparing {
+		t.Errorf(
+			"state: got %s, want %s",
+			journal.state,
+			RegistrationPreparing,
+		)
+	}
+
+	wantCalls := []string{"lease.acquire"}
+
+	if !slices.Equal(calls, wantCalls) {
+		t.Errorf(
+			"calls: got %v, want %v",
+			calls,
+			wantCalls,
+		)
 	}
 }

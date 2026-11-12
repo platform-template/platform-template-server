@@ -28,6 +28,50 @@ func leaseMicroseconds(ttl time.Duration) (int64, error) {
 	return ttl.Microseconds(), nil
 }
 
+func (s *LeaseStore) Begin(
+	ctx context.Context,
+	transactionID, userID uuid.UUID,
+	ttl time.Duration,
+) (app.RegistrationLease, error) {
+	microseconds, err := leaseMicroseconds(ttl)
+	if err != nil {
+		return app.RegistrationLease{}, err
+	}
+
+	ownerID := uuid.New()
+
+	_, err = s.db.ExecContext(ctx, `
+INSERT INTO registration_transactions (
+    transaction_id,
+    user_id,
+    state,
+    lease_owner,
+    lease_until,
+    lease_epoch
+)
+VALUES (
+    ?, ?, 'PREPARING', ?,
+    DATE_ADD(UTC_TIMESTAMP(6), INTERVAL ? MICROSECOND),
+    1
+)
+`,
+		transactionID.String(),
+		userID.String(),
+		ownerID.String(),
+		microseconds,
+	)
+	if err != nil {
+		return app.RegistrationLease{},
+			fmt.Errorf("begin leased registration: %w", err)
+	}
+
+	return app.RegistrationLease{
+		TransactionID: transactionID,
+		OwnerID:       ownerID,
+		Epoch:         1,
+	}, nil
+}
+
 func (s *LeaseStore) Acquire(
 	ctx context.Context,
 	transactionID uuid.UUID,
@@ -49,11 +93,6 @@ SET lease_owner = ?,
     ),
     lease_epoch = lease_epoch + 1
 WHERE transaction_id = ?
-  AND state IN (
-      'PREPARING',
-      'COMMIT_DECIDED',
-      'ABORT_DECIDED'
-  )
   AND (
       lease_until IS NULL
       OR lease_until <= UTC_TIMESTAMP(6)
