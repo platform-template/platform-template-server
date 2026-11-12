@@ -20,4 +20,5 @@ var migrations = []mysqlMigration{
 	Version1793996247,
 	Version1794345344,
 	Version1794380857,
+	Version1794456568,
 }
