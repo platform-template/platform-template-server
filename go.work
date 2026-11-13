@@ -1,6 +1,7 @@
 go 1.27.1
 
 use (
+	./e2e
 	./modules/auth
 	./modules/identity
 	./modules/session

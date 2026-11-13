@@ -41,3 +41,18 @@ run = "python3 mise-tasks/local-env config"
 
 [tasks.local-logs]
 run = "python3 mise-tasks/local-env logs"
+
+[tasks.e2e]
+description = "Build and run isolated Auth, Identity and Session E2E smoke tests"
+run = '''
+#!/usr/bin/env sh
+set -eu
+arch=$(docker info --format '{''{.Architecture}''}')
+case "$arch" in x86_64) arch=amd64 ;; aarch64) arch=arm64 ;; esac
+export GOARCH="$arch"
+for module in auth identity session; do
+    mise run "//modules/$module:build"
+    docker build --tag "distributed-programming-$module:e2e" "modules/$module"
+done
+go test -tags=e2e -v -count=1 ./e2e/...
+'''
