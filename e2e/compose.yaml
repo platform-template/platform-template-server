@@ -1,0 +1,108 @@
+x-mysql: &mysql
+  image: mysql:8.4
+  environment: &mysql-env
+    MYSQL_ROOT_PASSWORD: e2e-root
+    MYSQL_PASSWORD: e2e-password
+  ports:
+    - "3306"
+  healthcheck:
+    test:
+      - CMD-SHELL
+      - >-
+        mysql --protocol=tcp -h 127.0.0.1 -u$$MYSQL_USER -p$$MYSQL_PASSWORD
+        $$MYSQL_DATABASE -e 'SELECT 1' >/dev/null 2>&1
+    interval: 2s
+    timeout: 5s
+    retries: 60
+
+x-service: &service
+  ports:
+    - "8081"
+    - "8082"
+
+services:
+  auth-mysql:
+    <<: *mysql
+    environment:
+      <<: *mysql-env
+      MYSQL_DATABASE: auth_test
+      MYSQL_USER: auth
+
+  identity-mysql:
+    <<: *mysql
+    environment:
+      <<: *mysql-env
+      MYSQL_DATABASE: identity_test
+      MYSQL_USER: identity
+
+  session-mysql:
+    <<: *mysql
+    environment:
+      <<: *mysql-env
+      MYSQL_DATABASE: session_test
+      MYSQL_USER: session
+
+  rabbitmq:
+    image: rabbitmq:4.1-alpine
+    environment:
+      RABBITMQ_DEFAULT_USER: e2e
+      RABBITMQ_DEFAULT_PASS: e2e-password
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "-q", "ping"]
+      interval: 2s
+      timeout: 5s
+      retries: 60
+
+  identity:
+    <<: *service
+    image: distributed-programming-identity:e2e
+    environment:
+      IDENTITY_MYSQL_ADDRESS: identity-mysql:3306
+      IDENTITY_MYSQL_DATABASE: identity_test
+      IDENTITY_MYSQL_USER: identity
+      IDENTITY_MYSQL_PASSWORD: e2e-password
+      IDENTITY_AMQP_URL: amqp://e2e:e2e-password@rabbitmq:5672/
+      IDENTITY_APP_GRACE_TIMEOUT: 2s
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+      identity-mysql:
+        condition: service_healthy
+
+  session:
+    <<: *service
+    image: distributed-programming-session:e2e
+    environment:
+      SESSION_MYSQL_ADDRESS: session-mysql:3306
+      SESSION_MYSQL_DATABASE: session_test
+      SESSION_MYSQL_USER: session
+      SESSION_MYSQL_PASSWORD: e2e-password
+      SESSION_AMQP_URL: amqp://e2e:e2e-password@rabbitmq:5672/
+      SESSION_APP_GRACE_TIMEOUT: 2s
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+      session-mysql:
+        condition: service_healthy
+
+  auth:
+    <<: *service
+    image: distributed-programming-auth:e2e
+    environment:
+      AUTH_MYSQL_ADDRESS: auth-mysql:3306
+      AUTH_MYSQL_DATABASE: auth_test
+      AUTH_MYSQL_USER: auth
+      AUTH_MYSQL_PASSWORD: e2e-password
+      AUTH_AMQP_URL: amqp://e2e:e2e-password@rabbitmq:5672/
+      AUTH_IDENTITY_ADDRESS: identity:8081
+      AUTH_SESSION_ADDRESS: session:8081
+      AUTH_APP_GRACE_TIMEOUT: 2s
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+      auth-mysql:
+        condition: service_healthy
+      identity:
+        condition: service_started
+      session:
+        condition: service_started

@@ -164,10 +164,13 @@ mise run e2e
 ```
 
 Команда собирает образы Auth, Identity и Session и запускает отдельный набор
-`e2e` с Testcontainers. Временная Docker-сеть содержит три сервиса,
-три независимых MySQL 8.4 и RabbitMQ. Auth обращается к Identity и Session по
+`e2e` с Testcontainers Compose. Состав окружения описан в `e2e/compose.yaml`,
+готовые клиенты и подключения к базам доступны в `e2e/internal/testenv`.
+Каждый запуск получает отдельный Compose-проект и динамические порты.
+Временная Docker-сеть содержит три сервиса, три независимых MySQL 8.4 и RabbitMQ. Auth обращается к Identity и Session по
 внутренним gRPC-адресам; сервисы применяют собственные миграции при старте.
-Ожидание готовности использует проверки Testcontainers и HTTP `/healthz`.
+Ожидание готовности использует health checks Compose и HTTP `/healthz` через
+Testcontainers.
 Smoke-тест проверяет HTTP, gRPC Identity и Session и наличие таблиц после
 миграций. Контейнеры и сеть удаляются после теста, включая ошибки подготовки;
 существующая локальная база и её volumes не используются. Нужен доступ к Docker
