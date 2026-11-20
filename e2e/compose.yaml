@@ -16,6 +16,8 @@ x-mysql: &mysql
     retries: 60
 
 x-service: &service
+  labels:
+    e2e.http-health-port: "8082/tcp"
   ports:
     - "8081"
     - "8082"

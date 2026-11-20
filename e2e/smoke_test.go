@@ -8,9 +8,11 @@ import (
 	"testing"
 	"time"
 
+	"github.com/stretchr/testify/require"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 
+	"e2e/internal/clients"
 	identityapi "identity/api/server/internalapi"
 	sessionapi "session/api/server/internalapi"
 )
@@ -19,57 +21,42 @@ func TestServicesReady(t *testing.T) {
 	ctx, cancel := context.WithTimeout(t.Context(), 15*time.Second)
 	defer cancel()
 
-	tables := map[string]string{
-		"auth":     "password_credentials",
-		"identity": "users",
-		"session":  "sessions",
+	services := []struct{ name, table string }{
+		{"auth", "password_credentials"},
+		{"identity", "users"},
+		{"session", "sessions"},
 	}
-	for _, name := range []string{"auth", "identity", "session"} {
-		t.Run(name, func(t *testing.T) {
-			req, err := http.NewRequestWithContext(
-				ctx,
-				http.MethodGet,
-				env.HTTPURLs[name]+"/healthz",
-				nil,
-			)
-			if err != nil {
-				t.Fatal(err)
-			}
-			resp, err := env.HTTP.Do(req)
-			if err != nil {
-				t.Fatal(err)
-			}
+	for _, service := range services {
+		t.Run(service.name, func(t *testing.T) {
+			url, err := env.HTTPAddress(ctx, service.name)
+			require.NoError(t, err)
+			req, err := http.NewRequestWithContext(ctx, http.MethodGet, url+"/healthz", nil)
+			require.NoError(t, err)
+			resp, err := http.DefaultClient.Do(req)
+			require.NoError(t, err)
 			defer resp.Body.Close()
-			if resp.StatusCode != http.StatusNoContent {
-				t.Fatalf("health: %s", resp.Status)
-			}
+			require.Equal(t, http.StatusNoContent, resp.StatusCode)
 
+			db, err := env.MySQL(ctx, service.name+"-mysql")
+			require.NoError(t, err)
 			const query = `SELECT COUNT(*) FROM information_schema.tables
 WHERE table_schema = DATABASE() AND table_name = ?`
 			var count int
-			err = env.DB[name].QueryRowContext(ctx, query, tables[name]).
-				Scan(&count)
-			if err != nil || count != 1 {
-				t.Fatalf("migration table %s: count=%d error=%v", tables[name], count, err)
-			}
+			require.NoError(t, db.QueryRowContext(ctx, query, service.table).Scan(&count))
+			require.Equal(t, 1, count)
 		})
 	}
 
 	t.Run("identity-grpc", func(t *testing.T) {
-		_, err := env.Identity.FindUserByLogin(ctx, &identityapi.FindUserByLoginRequest{
-			Login: "e2e-absent",
-		})
-		if status.Code(err) != codes.NotFound {
-			t.Fatalf("gRPC returned %v, want %v", err, codes.NotFound)
-		}
+		client, err := clients.Identity(ctx, env)
+		require.NoError(t, err)
+		_, err = client.FindUserByLogin(ctx, &identityapi.FindUserByLoginRequest{Login: "e2e-absent"})
+		require.Equal(t, codes.NotFound, status.Code(err))
 	})
-
 	t.Run("session-grpc", func(t *testing.T) {
-		_, err := env.Session.ResolveSession(ctx, &sessionapi.ResolveSessionRequest{
-			Token: "e2e-absent",
-		})
-		if status.Code(err) != codes.Unauthenticated {
-			t.Fatalf("gRPC returned %v, want %v", err, codes.Unauthenticated)
-		}
+		client, err := clients.Session(ctx, env)
+		require.NoError(t, err)
+		_, err = client.ResolveSession(ctx, &sessionapi.ResolveSessionRequest{Token: "e2e-absent"})
+		require.Equal(t, codes.Unauthenticated, status.Code(err))
 	})
 }

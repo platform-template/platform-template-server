@@ -20,10 +20,10 @@ func TestMain(m *testing.M) {
 
 func run(m *testing.M) (result int) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
-	defer cancel()
 
 	var err error
 	env, err = testenv.Start(ctx, "compose.yaml")
+	cancel()
 	if err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		return 1

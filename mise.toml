@@ -42,8 +42,8 @@ run = "python3 mise-tasks/local-env config"
 [tasks.local-logs]
 run = "python3 mise-tasks/local-env logs"
 
-[tasks.e2e]
-description = "Build and run isolated Auth, Identity and Session E2E smoke tests"
+[tasks.e2e-build]
+description = "Build service images for E2E tests"
 run = '''
 #!/usr/bin/env sh
 set -eu
@@ -54,5 +54,15 @@ for module in auth identity session; do
     mise run "//modules/$module:build"
     docker build --tag "distributed-programming-$module:e2e" "modules/$module"
 done
-go test -tags=e2e -v -count=1 ./e2e/...
 '''
+
+[tasks.e2e-test]
+description = "Run E2E tests with existing service images"
+run = "go test -p 1 -tags=e2e -v -count=1 ./e2e/..."
+
+[tasks.e2e]
+description = "Build images and run isolated E2E tests"
+run = [
+    { task = "e2e-build" },
+    { task = "e2e-test" },
+]
