@@ -29,7 +29,8 @@ func (r *initialSuperuserRepository) Bootstrap(
 	var lockID int
 	if err := r.client.QueryRowContext(
 		r.ctx,
-		"authz.initial_superuser.lock", `SELECT id FROM initial_superuser_lock WHERE id = 1 FOR UPDATE`,
+		"authz.initial_superuser.lock",
+		`SELECT id FROM initial_superuser_lock WHERE id = 1 FOR UPDATE`,
 	).Scan(&lockID); err != nil {
 		return fmt.Errorf("lock initial superuser: %w", err)
 	}
@@ -37,7 +38,8 @@ func (r *initialSuperuserRepository) Bootstrap(
 	var existingUserID string
 	err := r.client.QueryRowContext(
 		r.ctx,
-		"authz.initial_superuser.find", `SELECT user_id FROM system_roles WHERE role = 'superuser' LIMIT 1`,
+		"authz.initial_superuser.find",
+		`SELECT user_id FROM system_roles WHERE role = 'superuser' LIMIT 1`,
 	).Scan(&existingUserID)
 	if errors.Is(err, sql.ErrNoRows) {
 		_, err = r.client.ExecContext(

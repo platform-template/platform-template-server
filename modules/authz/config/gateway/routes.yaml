@@ -1,0 +1,12 @@
+kind: gateway/service/v1
+name: authz
+weight: 100
+routes:
+  - pattern: '^/api/v1/authz/grants$'
+    allowedMethods: [POST]
+    target: authz-service:8082
+    disableHostRewrite: true
+  - pattern: '^/api/v1/authz/grants/[^/]+/[^/]+$'
+    allowedMethods: [DELETE]
+    target: authz-service:8082
+    disableHostRewrite: true

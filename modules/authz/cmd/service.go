@@ -8,6 +8,7 @@ import (
 
 	"github.com/distributed-programming-2026/go-sdk/pkg/mysql"
 	"github.com/distributed-programming-2026/go-sdk/pkg/uow"
+	interceptorgrpc "github.com/distributed-programming-2026/lib/gateway/interceptor"
 	"github.com/urfave/cli/v3"
 	"golang.org/x/sync/errgroup"
 	"google.golang.org/grpc"
@@ -17,6 +18,7 @@ import (
 	"authz/internal/authz/app"
 	"authz/internal/authz/config"
 	sessionclient "authz/internal/authz/infra/grpc/session"
+	interceptorhandler "authz/internal/authz/infra/handlers/interceptor"
 	internalhandler "authz/internal/authz/infra/handlers/internalapi"
 	publichandler "authz/internal/authz/infra/handlers/public"
 	authzmysql "authz/internal/authz/infra/mysql"
@@ -87,6 +89,13 @@ func serve(
 			GraceTimeout: conf.App.GraceTimeout,
 		},
 		func(server *grpc.Server) error {
+			interceptorgrpc.RegisterInterceptorServer(
+				server,
+				interceptorhandler.NewHandler(
+					sessionclient.NewClient(connection),
+					svc,
+				),
+			)
 			internalapi.RegisterAuthzServiceServer(
 				server,
 				internalhandler.NewHandler(

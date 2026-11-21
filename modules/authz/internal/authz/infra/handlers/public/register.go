@@ -32,50 +32,52 @@ func Register(
 		return nil, err
 	}
 	return func(router chi.Router) error {
-		router.Use(func(next http.Handler) http.Handler {
-			return http.HandlerFunc(
-				func(w http.ResponseWriter, r *http.Request) {
-					route, params, err := validator.FindRoute(r)
-					if err == nil {
-						err = openapi3filter.ValidateRequest(
-							r.Context(),
-							&openapi3filter.RequestValidationInput{
-								Request:    r,
-								PathParams: params,
-								Route:      route,
-								Options: &openapi3filter.Options{
-									AuthenticationFunc: openapi3filter.NoopAuthenticationFunc,
+		router.Group(func(router chi.Router) {
+			router.Use(func(next http.Handler) http.Handler {
+				return http.HandlerFunc(
+					func(w http.ResponseWriter, r *http.Request) {
+						route, params, err := validator.FindRoute(r)
+						if err == nil {
+							err = openapi3filter.ValidateRequest(
+								r.Context(),
+								&openapi3filter.RequestValidationInput{
+									Request:    r,
+									PathParams: params,
+									Route:      route,
+									Options: &openapi3filter.Options{
+										AuthenticationFunc: openapi3filter.NoopAuthenticationFunc,
+									},
 								},
-							},
-						)
-					}
-					if err != nil {
+							)
+						}
+						if err != nil {
+							http.Error(
+								w,
+								"invalid request",
+								http.StatusBadRequest,
+							)
+							return
+						}
+						next.ServeHTTP(w, r)
+					},
+				)
+			})
+			router.Use(csrf)
+			strict := publicapi.NewStrictHandlerWithOptions(
+				NewHandler(svc, sessions),
+				[]publicapi.StrictMiddlewareFunc{withSessionToken},
+				publicapi.StrictHTTPServerOptions{
+					ResponseErrorHandlerFunc: func(w http.ResponseWriter, _ *http.Request, _ error) {
 						http.Error(
 							w,
-							"invalid request",
-							http.StatusBadRequest,
+							"internal server error",
+							http.StatusInternalServerError,
 						)
-						return
-					}
-					next.ServeHTTP(w, r)
+					},
 				},
 			)
+			publicapi.HandlerFromMux(strict, router)
 		})
-		router.Use(csrf)
-		strict := publicapi.NewStrictHandlerWithOptions(
-			NewHandler(svc, sessions),
-			[]publicapi.StrictMiddlewareFunc{withSessionToken},
-			publicapi.StrictHTTPServerOptions{
-				ResponseErrorHandlerFunc: func(w http.ResponseWriter, _ *http.Request, _ error) {
-					http.Error(
-						w,
-						"internal server error",
-						http.StatusInternalServerError,
-					)
-				},
-			},
-		)
-		publicapi.HandlerFromMux(strict, router)
 		return nil
 	}, nil
 }

@@ -1,0 +1,18 @@
+services:
+  authz-service:
+    image: distributed-programming-authz:local
+    build:
+      context: ./modules/authz
+      dockerfile: Dockerfile
+    command: [service]
+    environment:
+      AUTHZ_MYSQL_ADDRESS: mysql:3306
+      AUTHZ_SESSION_ADDRESS: session-service:8081
+    ports:
+      - "${AUTHZ_GRPC_PORT:-8081}:8081"
+      - "${AUTHZ_HTTP_PORT:-8082}:8082"
+    depends_on:
+      mysql:
+        condition: service_healthy
+      session-service:
+        condition: service_started
