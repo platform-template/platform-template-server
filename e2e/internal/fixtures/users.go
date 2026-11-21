@@ -4,6 +4,7 @@ import (
 	publicapi "auth/api/server/publicapi"
 	"crypto/rand"
 	"encoding/hex"
+
 	openapi "github.com/oapi-codegen/runtime/types"
 )
 

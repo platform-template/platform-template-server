@@ -195,11 +195,27 @@ SELECT password_hash FROM password_credentials WHERE user_id = ?`, userID)
 	require.Equal(t, http.StatusBadRequest, response.statusCode)
 
 	before := testEnv.remotes.session.sessionCount()
-	response = authRequest(t, authAPIPath+"/login", loginRequest{Login: testUsers.register.login, Password: incorrectPassword}, nil)
+	response = authRequest(
+		t,
+		authAPIPath+"/login",
+		loginRequest{
+			Login:    testUsers.register.login,
+			Password: incorrectPassword
+		},
+		nil,
+	)
 	require.Equal(t, http.StatusUnauthorized, response.statusCode)
 	require.Equal(t, before, testEnv.remotes.session.sessionCount())
 
-	response = authRequest(t, authAPIPath+"/login", loginRequest{Login: "absent-user", Password: testUsers.register.password}, nil)
+	response = authRequest(
+		t,
+		authAPIPath+"/login",
+		loginRequest{
+			Login: "absent-user", 
+			Password: testUsers.register.password
+		},
+		nil,
+	)
 	require.Equal(t, http.StatusUnauthorized, response.statusCode)
 	require.Equal(t, before, testEnv.remotes.session.sessionCount())
 

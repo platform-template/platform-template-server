@@ -93,9 +93,9 @@ func TestPasswordCredential_ChangePasswordHash(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			credential := &PasswordCredential{
-				userID:        uuid.New(),
+				userID:       uuid.New(),
 				login:        testLogin,
-				passwordHash:  testOldHash,
+				passwordHash: testOldHash,
 			}
 
 			err := credential.changePasswordHash(tt.newHash)

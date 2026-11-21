@@ -14,8 +14,12 @@ import (
 	"auth/internal/auth/config"
 )
 
-func newDispatcher(logger *slog.Logger, conf config.Env, db *database, connection amqp.Connection) (event.Dispatcher, *outbox.Relay, error) {
-	// Declare the durable queue before publishing, even if the consumer is offline.
+func newDispatcher(
+	logger *slog.Logger,
+	conf config.Env,
+	db *database,
+	connection amqp.Connection,
+) (event.Dispatcher, *outbox.Relay, error) {
 	producer := connection.Producer(domainevent.DomainExchange(), eventQueue(conf), eventBinding(conf))
 	transport, err := eventamqp.NewDispatcher(producer)
 	if err != nil {

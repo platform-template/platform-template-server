@@ -23,7 +23,10 @@ func stringPointer(value string) *string {
 
 func identityClient(t *testing.T) identityapi.IdentityServiceClient {
 	t.Helper()
-	connection, err := grpc.NewClient(testEnv.conf.GRPC.Address, grpc.WithTransportCredentials(insecure.NewCredentials()))
+	connection, err := grpc.NewClient(
+		testEnv.conf.GRPC.Address,
+		grpc.WithTransportCredentials(insecure.NewCredentials()),
+	)
 	require.NoError(t, err)
 	t.Cleanup(func() { require.NoError(t, connection.Close()) })
 	return identityapi.NewIdentityServiceClient(connection)

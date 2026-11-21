@@ -17,7 +17,10 @@ import (
 
 func sessionClient(t *testing.T) sessionapi.SessionServiceClient {
 	t.Helper()
-	connection, err := grpc.NewClient(testEnv.conf.GRPC.Address, grpc.WithTransportCredentials(insecure.NewCredentials()))
+	connection, err := grpc.NewClient(
+		testEnv.conf.GRPC.Address,
+		grpc.WithTransportCredentials(insecure.NewCredentials()),
+	)
 	require.NoError(t, err)
 	t.Cleanup(func() { require.NoError(t, connection.Close()) })
 	return sessionapi.NewSessionServiceClient(connection)
@@ -74,7 +77,10 @@ func TestSessionGRPCRevocation(t *testing.T) {
 	foreign, err := client.CreateSession(t.Context(), &sessionapi.CreateSessionRequest{UserId: otherUserID})
 	require.NoError(t, err)
 
-	_, err = client.RevokeOthersByUserID(t.Context(), &sessionapi.RevokeOthersByUserIDRequest{UserId: userID, Token: current.GetToken()})
+	_, err = client.RevokeOthersByUserID(
+		t.Context(),
+		&sessionapi.RevokeOthersByUserIDRequest{UserId: userID, Token: current.GetToken()},
+	)
 	require.NoError(t, err)
 	require.Equal(t, userID, resolveSession(t, client, current.GetToken()))
 	_, err = client.ResolveSession(t.Context(), &sessionapi.ResolveSessionRequest{Token: other.GetToken()})

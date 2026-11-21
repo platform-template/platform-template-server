@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	authapi "auth/api/server/publicapi"
+
 	"github.com/stretchr/testify/require"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"

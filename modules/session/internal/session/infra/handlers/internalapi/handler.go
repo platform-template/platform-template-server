@@ -25,7 +25,10 @@ type handler struct {
 	sessioninternalapi.UnimplementedSessionServiceServer
 }
 
-func (h handler) CreateSession(ctx context.Context, req *sessioninternalapi.CreateSessionRequest) (*sessioninternalapi.CreateSessionResponse, error) {
+func (h handler) CreateSession(
+	ctx context.Context,
+	req *sessioninternalapi.CreateSessionRequest,
+) (*sessioninternalapi.CreateSessionResponse, error) {
 	userID, err := uuid.Parse(req.GetUserId())
 	if err != nil {
 		return nil, status.Error(codes.InvalidArgument, "invalid user ID")
@@ -41,7 +44,10 @@ func (h handler) CreateSession(ctx context.Context, req *sessioninternalapi.Crea
 	}, nil
 }
 
-func (h handler) ResolveSession(ctx context.Context, req *sessioninternalapi.ResolveSessionRequest) (*sessioninternalapi.ResolveSessionResponse, error) {
+func (h handler) ResolveSession(
+	ctx context.Context,
+	req *sessioninternalapi.ResolveSessionRequest,
+) (*sessioninternalapi.ResolveSessionResponse, error) {
 	userID, err := h.svc.Resolve(ctx, req.GetToken())
 	if err != nil {
 		return nil, h.handleError(ctx, "resolve session", err)
@@ -52,7 +58,10 @@ func (h handler) ResolveSession(ctx context.Context, req *sessioninternalapi.Res
 	}, nil
 }
 
-func (h handler) RevokeSession(ctx context.Context, req *sessioninternalapi.RevokeSessionRequest) (*sessioninternalapi.RevokeSessionResponse, error) {
+func (h handler) RevokeSession(
+	ctx context.Context,
+	req *sessioninternalapi.RevokeSessionRequest,
+) (*sessioninternalapi.RevokeSessionResponse, error) {
 	if err := h.svc.RevokeByToken(ctx, req.GetToken()); err != nil {
 		return nil, h.handleError(ctx, "revoke session", err)
 	}
@@ -60,7 +69,10 @@ func (h handler) RevokeSession(ctx context.Context, req *sessioninternalapi.Revo
 	return &sessioninternalapi.RevokeSessionResponse{}, nil
 }
 
-func (h handler) RevokeOthersByUserID(ctx context.Context, req *sessioninternalapi.RevokeOthersByUserIDRequest) (*sessioninternalapi.RevokeOthersByUserIDResponse, error) {
+func (h handler) RevokeOthersByUserID(
+	ctx context.Context,
+	req *sessioninternalapi.RevokeOthersByUserIDRequest,
+) (*sessioninternalapi.RevokeOthersByUserIDResponse, error) {
 	userID, err := uuid.Parse(req.GetUserId())
 	if err != nil {
 		return nil, status.Error(codes.InvalidArgument, "invalid user ID")

@@ -209,7 +209,10 @@ func (e *environment) startApplication(ctx context.Context, command string) (tes
 	})
 }
 
-func (e *environment) startContainer(ctx context.Context, request testcontainers.ContainerRequest) (testcontainers.Container, error) {
+func (e *environment) startContainer(
+	ctx context.Context,
+	request testcontainers.ContainerRequest,
+) (testcontainers.Container, error) {
 	container, err := testcontainers.GenericContainer(ctx, testcontainers.GenericContainerRequest{
 		ContainerRequest: request,
 		Started:          true,

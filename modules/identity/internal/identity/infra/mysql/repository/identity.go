@@ -69,7 +69,14 @@ WHERE login_snapshot = ?
 		return nil, fmt.Errorf("parse user ID: %w", err)
 	}
 
-	user, err := domain.NewUser(userID, firstName, lastName, nullableString(middleName), storedLoginSnapshot, domain.Email(email))
+	user, err := domain.NewUser(
+		userID,
+		firstName,
+		lastName,
+		nullableString(middleName),
+		storedLoginSnapshot,
+		domain.Email(email),
+	)
 	if err != nil {
 		return nil, fmt.Errorf("restore user: %w", err)
 	}

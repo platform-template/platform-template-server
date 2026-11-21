@@ -34,10 +34,25 @@ func TestHandlerIntercept(t *testing.T) {
 		statusCode int32
 		wantUserID string
 	}{
-		{name: "valid session", cookie: "session=token", resolver: fakeResolver{userID: userID}, wantUserID: userID.String()},
+		{
+			name:       "valid session",
+			cookie:     "session=token",
+			resolver:   fakeResolver{userID: userID},
+			wantUserID: userID.String(),
+		},
 		{name: "missing session", cookie: "other=value", statusCode: 401},
-		{name: "expired session", cookie: "session=expired", resolver: fakeResolver{err: domain.ErrSessionExpired}, statusCode: 401},
-		{name: "resolver failure", cookie: "session=token", resolver: fakeResolver{err: errors.New("database unavailable")}, statusCode: 503},
+		{
+			name:       "expired session",
+			cookie:     "session=expired",
+			resolver:   fakeResolver{err: domain.ErrSessionExpired},
+			statusCode: 401,
+		},
+		{
+			name:       "resolver failure",
+			cookie:     "session=token",
+			resolver:   fakeResolver{err: errors.New("database unavailable")},
+			statusCode: 503,
+		},
 	}
 
 	for _, tt := range tests {

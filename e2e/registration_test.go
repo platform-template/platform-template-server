@@ -164,9 +164,16 @@ func TestRegisterDuplicateLogin(t *testing.T) {
 		t, ctx, identityDB,
 		"SELECT COUNT(*) FROM users WHERE login_snapshot = ? AND id = ?", user.Login, id,
 	))
-	require.Equal(t, 1, countRows(t, ctx, identityDB, "SELECT COUNT(*) FROM users WHERE login_snapshot = ?", user.Login))
+	require.Equal(
+		t,
+		1,
+		countRows(t, ctx, identityDB, "SELECT COUNT(*) FROM users WHERE login_snapshot = ?", user.Login),
+	)
 	require.Zero(t, countRows(t, ctx, identityDB, "SELECT COUNT(*) FROM users WHERE id = ?", tx.userID))
-	require.Zero(t, countRows(t, ctx, authDB, "SELECT COUNT(*) FROM xa_branch_receipts WHERE transaction_id = ?", tx.id))
+	require.Zero(
+		t,
+		countRows(t, ctx, authDB, "SELECT COUNT(*) FROM xa_branch_receipts WHERE transaction_id = ?", tx.id),
+	)
 	require.Zero(t, countRows(
 		t, ctx, identityDB,
 		"SELECT COUNT(*) FROM xa_branch_receipts WHERE transaction_id = ?", tx.id,

@@ -283,10 +283,37 @@ func TestIdentityService_Update(t *testing.T) {
 		found   *User
 		wantErr error
 	}{
-		{name: "updates profile", first: updatedFirstName, last: updatedLastName, middle: stringPointer("Lee"), email: updatedEmail, found: current},
-		{name: "missing user", first: updatedFirstName, last: updatedLastName, email: updatedEmail, wantErr: ErrUserNotFound},
-		{name: "empty first name", first: "", last: updatedLastName, email: updatedEmail, found: current, wantErr: ErrInvalidFirstName},
-		{name: "invalid email", first: updatedFirstName, last: updatedLastName, email: "invalid", found: current, wantErr: ErrInvalidEmail},
+		{
+			name:   "updates profile",
+			first:  updatedFirstName,
+			last:   updatedLastName,
+			middle: stringPointer("Lee"),
+			email:  updatedEmail,
+			found:  current,
+		},
+		{
+			name:    "missing user",
+			first:   updatedFirstName,
+			last:    updatedLastName,
+			email:   updatedEmail,
+			wantErr: ErrUserNotFound,
+		},
+		{
+			name:    "empty first name",
+			first:   "",
+			last:    updatedLastName,
+			email:   updatedEmail,
+			found:   current,
+			wantErr: ErrInvalidFirstName,
+		},
+		{
+			name:    "invalid email",
+			first:   updatedFirstName,
+			last:    updatedLastName,
+			email:   "invalid",
+			found:   current,
+			wantErr: ErrInvalidEmail,
+		},
 	}
 
 	for _, tt := range tests {

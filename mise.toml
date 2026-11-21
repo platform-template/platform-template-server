@@ -23,6 +23,7 @@ description = "Generate, tidy, build, test, and lint every module sequentially"
 run = '''
 MISE_JOBS=1 mise run //lib/...:all
 MISE_JOBS=1 mise run //modules/...:all
+MISE_JOBS=1 mise run //:e2e-lint
 '''
 
 [tasks.local-up]
@@ -59,6 +60,11 @@ done
 [tasks.e2e-test]
 description = "Run E2E tests with existing service images"
 run = "go test -p 1 -tags=e2e -v -count=1 ./e2e/..."
+
+[tasks.e2e-lint]
+description = "Check formatting of E2E Go code"
+dir = "{{ config_root }}/e2e"
+run = "golangci-lint run --build-tags=e2e ./..."
 
 [tasks.e2e]
 description = "Build images and run isolated E2E tests"

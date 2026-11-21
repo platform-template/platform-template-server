@@ -11,8 +11,9 @@ import (
 	authapi "auth/api/server/publicapi"
 	"e2e/internal/clients"
 	"e2e/internal/fixtures"
-	"github.com/stretchr/testify/require"
 	sessionapi "session/api/server/internalapi"
+
+	"github.com/stretchr/testify/require"
 )
 
 func scenario(t *testing.T) (context.Context, *authapi.ClientWithResponses, authapi.RegisterRequest) {
@@ -26,7 +27,12 @@ func scenario(t *testing.T) (context.Context, *authapi.ClientWithResponses, auth
 	return ctx, client, user
 }
 
-func registeredUser(t *testing.T, ctx context.Context, client *authapi.ClientWithResponses, user authapi.RegisterRequest) string {
+func registeredUser(
+	t *testing.T,
+	ctx context.Context,
+	client *authapi.ClientWithResponses,
+	user authapi.RegisterRequest,
+) string {
 	t.Helper()
 	response, err := client.RegisterWithResponse(ctx, user)
 	require.NoError(t, err)
@@ -37,7 +43,12 @@ func registeredUser(t *testing.T, ctx context.Context, client *authapi.ClientWit
 	return id
 }
 
-func loggedIn(t *testing.T, ctx context.Context, client *authapi.ClientWithResponses, login, password string) *http.Cookie {
+func loggedIn(
+	t *testing.T,
+	ctx context.Context,
+	client *authapi.ClientWithResponses,
+	login, password string,
+) *http.Cookie {
 	t.Helper()
 	response, err := client.LoginWithResponse(ctx, authapi.LoginRequest{Login: login, Password: password})
 	require.NoError(t, err)
@@ -59,7 +70,11 @@ func withCookie(cookie *http.Cookie) authapi.RequestEditorFn {
 	return func(_ context.Context, req *http.Request) error { req.AddCookie(cookie); return nil }
 }
 
-func resolveSession(t *testing.T, ctx context.Context, cookie *http.Cookie) (*sessionapi.ResolveSessionResponse, error) {
+func resolveSession(
+	t *testing.T,
+	ctx context.Context,
+	cookie *http.Cookie,
+) (*sessionapi.ResolveSessionResponse, error) {
 	t.Helper()
 	client, err := clients.Session(ctx, env)
 	require.NoError(t, err)
