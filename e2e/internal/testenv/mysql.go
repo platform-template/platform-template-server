@@ -10,12 +10,24 @@ import (
 )
 
 func (e *Environment) MySQL(ctx context.Context, service string) (*sql.DB, error) {
+	return e.mysql(ctx, service, false)
+}
+
+func (e *Environment) MySQLRoot(ctx context.Context, service string) (*sql.DB, error) {
+	return e.mysql(ctx, service, true)
+}
+
+func (e *Environment) mysql(ctx context.Context, service string, root bool) (*sql.DB, error) {
 	e.mu.Lock()
 	defer e.mu.Unlock()
 	if e.closed {
 		return nil, fmt.Errorf("connect %s MySQL: environment is closed", service)
 	}
-	if db := e.databases[service]; db != nil {
+	cacheKey := service
+	if root {
+		cacheKey += ":root"
+	}
+	if db := e.databases[cacheKey]; db != nil {
 		return db, nil
 	}
 	container, err := e.stack.ServiceContainer(ctx, service)
@@ -32,11 +44,15 @@ func (e *Environment) MySQL(ctx context.Context, service string) (*sql.DB, error
 	values := make(map[string]string)
 	for _, item := range info.Config.Env {
 		key, value, _ := strings.Cut(item, "=")
-		if key == "MYSQL_DATABASE" || key == "MYSQL_USER" || key == "MYSQL_PASSWORD" {
+		if key == "MYSQL_DATABASE" || key == "MYSQL_USER" || key == "MYSQL_PASSWORD" || key == "MYSQL_ROOT_PASSWORD" {
 			values[key] = value
 		}
 	}
-	for _, key := range []string{"MYSQL_DATABASE", "MYSQL_USER", "MYSQL_PASSWORD"} {
+	required := []string{"MYSQL_DATABASE", "MYSQL_USER", "MYSQL_PASSWORD"}
+	if root {
+		required = []string{"MYSQL_DATABASE", "MYSQL_ROOT_PASSWORD"}
+	}
+	for _, key := range required {
 		if values[key] == "" {
 			return nil, fmt.Errorf("MySQL service %q is missing %s", service, key)
 		}
@@ -50,6 +66,9 @@ func (e *Environment) MySQL(ctx context.Context, service string) (*sql.DB, error
 	cfg.DBName = values["MYSQL_DATABASE"]
 	cfg.User = values["MYSQL_USER"]
 	cfg.Passwd = values["MYSQL_PASSWORD"]
+	if root {
+		cfg.User, cfg.Passwd = "root", values["MYSQL_ROOT_PASSWORD"]
+	}
 	cfg.ParseTime = true
 	db, err := sql.Open("mysql", cfg.FormatDSN())
 	if err != nil {
@@ -59,6 +78,6 @@ func (e *Environment) MySQL(ctx context.Context, service string) (*sql.DB, error
 		_ = db.Close()
 		return nil, fmt.Errorf("connect to MySQL service %q: %w", service, err)
 	}
-	e.databases[service] = db
+	e.databases[cacheKey] = db
 	return db, nil
 }

@@ -50,7 +50,7 @@ services:
       RABBITMQ_DEFAULT_USER: e2e
       RABBITMQ_DEFAULT_PASS: e2e-password
     healthcheck:
-      test: ["CMD", "rabbitmq-diagnostics", "-q", "ping"]
+      test: ["CMD", "su-exec", "rabbitmq", "rabbitmq-diagnostics", "-q", "ping"]
       interval: 2s
       timeout: 5s
       retries: 60
