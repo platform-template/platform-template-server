@@ -200,7 +200,7 @@ SELECT password_hash FROM password_credentials WHERE user_id = ?`, userID)
 		authAPIPath+"/login",
 		loginRequest{
 			Login:    testUsers.register.login,
-			Password: incorrectPassword
+			Password: incorrectPassword,
 		},
 		nil,
 	)
@@ -211,8 +211,8 @@ SELECT password_hash FROM password_credentials WHERE user_id = ?`, userID)
 		t,
 		authAPIPath+"/login",
 		loginRequest{
-			Login: "absent-user", 
-			Password: testUsers.register.password
+			Login:    "absent-user",
+			Password: testUsers.register.password,
 		},
 		nil,
 	)

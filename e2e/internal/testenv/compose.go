@@ -3,6 +3,7 @@ package testenv
 import (
 	"context"
 	"fmt"
+	"io"
 	"net"
 	"net/http"
 	"time"
@@ -44,6 +45,39 @@ func (e *Environment) start(ctx context.Context) error {
 		}
 	}
 	return nil
+}
+
+func (e *Environment) BootstrapSuperuser(ctx context.Context, userID string) error {
+	container, err := e.stack.ServiceContainer(ctx, "authz")
+	if err != nil {
+		return fmt.Errorf("find authz: %w", err)
+	}
+	code, output, err := container.Exec(ctx, []string{"/authz", "bootstrap-superuser", "--user-id", userID})
+	if err != nil {
+		return fmt.Errorf("run bootstrap: %w", err)
+	}
+	if code != 0 {
+		body, _ := io.ReadAll(output)
+		return fmt.Errorf("bootstrap exited %d: %s", code, body)
+	}
+	return nil
+}
+
+func (e *Environment) StopService(ctx context.Context, name string) error {
+	container, err := e.stack.ServiceContainer(ctx, name)
+	if err != nil {
+		return err
+	}
+	timeout := 3 * time.Second
+	return container.Stop(ctx, &timeout)
+}
+
+func (e *Environment) StartService(ctx context.Context, name string) error {
+	container, err := e.stack.ServiceContainer(ctx, name)
+	if err != nil {
+		return err
+	}
+	return container.Start(ctx)
 }
 
 func (e *Environment) Address(ctx context.Context, name, port string) (string, error) {

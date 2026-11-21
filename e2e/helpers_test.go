@@ -11,7 +11,6 @@ import (
 	authapi "auth/api/server/publicapi"
 	"e2e/internal/clients"
 	"e2e/internal/fixtures"
-	sessionapi "session/api/server/internalapi"
 
 	"github.com/stretchr/testify/require"
 )
@@ -70,13 +69,6 @@ func withCookie(cookie *http.Cookie) authapi.RequestEditorFn {
 	return func(_ context.Context, req *http.Request) error { req.AddCookie(cookie); return nil }
 }
 
-func resolveSession(
-	t *testing.T,
-	ctx context.Context,
-	cookie *http.Cookie,
-) (*sessionapi.ResolveSessionResponse, error) {
-	t.Helper()
-	client, err := clients.Session(ctx, env)
-	require.NoError(t, err)
-	return client.ResolveSession(ctx, &sessionapi.ResolveSessionRequest{Token: cookie.Value})
+func authLogin(login, password string) authapi.LoginRequest {
+	return authapi.LoginRequest{Login: login, Password: password}
 }

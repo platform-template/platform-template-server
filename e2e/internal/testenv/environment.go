@@ -3,7 +3,6 @@ package testenv
 import (
 	"context"
 	"crypto/rand"
-	"database/sql"
 	"errors"
 	"fmt"
 	"os"
@@ -22,7 +21,6 @@ type Environment struct {
 	closed      bool
 	closeErr    error
 	connections map[string]*grpc.ClientConn
-	databases   map[string]*sql.DB
 }
 
 func Start(ctx context.Context, composeFile string) (_ *Environment, err error) {
@@ -42,7 +40,6 @@ func Start(ctx context.Context, composeFile string) (_ *Environment, err error) 
 		stack:       stack,
 		project:     project,
 		connections: make(map[string]*grpc.ClientConn),
-		databases:   make(map[string]*sql.DB),
 	}
 	defer func() {
 		if err != nil {
@@ -68,11 +65,6 @@ func (e *Environment) Close() error {
 	for name, conn := range e.connections {
 		if err := conn.Close(); err != nil {
 			errs = append(errs, fmt.Errorf("close %s gRPC: %w", name, err))
-		}
-	}
-	for name, db := range e.databases {
-		if err := db.Close(); err != nil {
-			errs = append(errs, fmt.Errorf("close %s MySQL: %w", name, err))
 		}
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)

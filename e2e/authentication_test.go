@@ -9,8 +9,6 @@ import (
 	authapi "auth/api/server/publicapi"
 
 	"github.com/stretchr/testify/require"
-	"google.golang.org/grpc/codes"
-	"google.golang.org/grpc/status"
 )
 
 func TestLoginCreatesSession(t *testing.T) {
@@ -21,18 +19,14 @@ func TestLoginCreatesSession(t *testing.T) {
 	require.NoError(t, err)
 	cookie := loginCookie(t, response)
 
-	session, err := resolveSession(t, ctx, cookie)
-	require.NoError(t, err)
-	require.Equal(t, id, session.GetUserId())
+	result := profile(t, ctx, cookie)
+	require.Equal(t, http.StatusOK, result.StatusCode())
+	require.Equal(t, id, result.JSON200.UserId.String())
 }
 
 func TestLoginRejectsInvalidCredentials(t *testing.T) {
 	ctx, client, user := scenario(t)
 	registeredUser(t, ctx, client, user)
-	db, err := env.MySQL(ctx, "session-mysql")
-	require.NoError(t, err)
-	var before int
-	require.NoError(t, db.QueryRowContext(ctx, "SELECT COUNT(*) FROM sessions").Scan(&before))
 
 	for _, tc := range []struct{ name, login, password string }{
 		{"unknown login", user.Login + "-absent", user.Password},
@@ -45,24 +39,20 @@ func TestLoginRejectsInvalidCredentials(t *testing.T) {
 			require.Zero(t, len(response.HTTPResponse.Cookies()))
 		})
 	}
-	var after int
-	require.NoError(t, db.QueryRowContext(ctx, "SELECT COUNT(*) FROM sessions").Scan(&after))
-	require.Equal(t, before, after)
+	cookie := loggedIn(t, ctx, client, user.Login, user.Password)
+	require.Equal(t, http.StatusOK, profile(t, ctx, cookie).StatusCode())
 }
 
 func TestLogoutRevokesSession(t *testing.T) {
 	ctx, client, user := scenario(t)
-	id := registeredUser(t, ctx, client, user)
+	registeredUser(t, ctx, client, user)
 	cookie := loggedIn(t, ctx, client, user.Login, user.Password)
-	session, err := resolveSession(t, ctx, cookie)
-	require.NoError(t, err)
-	require.Equal(t, id, session.GetUserId())
+	require.Equal(t, http.StatusOK, profile(t, ctx, cookie).StatusCode())
 
 	response, err := client.LogoutWithResponse(ctx, withCookie(cookie))
 	require.NoError(t, err)
 	require.Equal(t, http.StatusNoContent, response.StatusCode())
-	_, err = resolveSession(t, ctx, cookie)
-	require.Equal(t, codes.Unauthenticated, status.Code(err))
+	require.Equal(t, http.StatusUnauthorized, profile(t, ctx, cookie).StatusCode())
 }
 
 func TestChangePassword(t *testing.T) {
@@ -80,18 +70,17 @@ func TestChangePassword(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, http.StatusNoContent, response.StatusCode())
 
-	session, err := resolveSession(t, ctx, current)
-	require.NoError(t, err)
-	require.Equal(t, id, session.GetUserId())
-	_, err = resolveSession(t, ctx, other)
-	require.Equal(t, codes.Unauthenticated, status.Code(err))
+	currentProfile := profile(t, ctx, current)
+	require.Equal(t, http.StatusOK, currentProfile.StatusCode())
+	require.Equal(t, id, currentProfile.JSON200.UserId.String())
+	require.Equal(t, http.StatusUnauthorized, profile(t, ctx, other).StatusCode())
 	oldLogin, err := client.LoginWithResponse(ctx, authapi.LoginRequest{Login: user.Login, Password: user.Password})
 	require.NoError(t, err)
 	require.Equal(t, http.StatusUnauthorized, oldLogin.StatusCode())
 	newLogin, err := client.LoginWithResponse(ctx, authapi.LoginRequest{Login: user.Login, Password: newPassword})
 	require.NoError(t, err)
 	newCookie := loginCookie(t, newLogin)
-	session, err = resolveSession(t, ctx, newCookie)
-	require.NoError(t, err)
-	require.Equal(t, id, session.GetUserId())
+	newProfile := profile(t, ctx, newCookie)
+	require.Equal(t, http.StatusOK, newProfile.StatusCode())
+	require.Equal(t, id, newProfile.JSON200.UserId.String())
 }

@@ -7,7 +7,7 @@ import (
 )
 
 func Auth(ctx context.Context, env *testenv.Environment) (*publicapi.ClientWithResponses, error) {
-	address, err := env.HTTPAddress(ctx, "auth")
+	address, err := env.GatewayAddress(ctx)
 	if err != nil {
 		return nil, err
 	}

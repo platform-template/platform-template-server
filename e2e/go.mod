@@ -4,6 +4,7 @@ go 1.27.1
 
 require (
 	auth v0.0.0
+	authz v0.0.0
 	github.com/containerd/errdefs v1.0.0
 	github.com/go-sql-driver/mysql v1.10.1
 	github.com/moby/moby/api v1.55.0
@@ -166,3 +167,5 @@ replace session => ../modules/session
 replace github.com/distributed-programming-2026/lib => ../lib
 
 replace auth => ../modules/auth
+
+replace authz => ../modules/authz

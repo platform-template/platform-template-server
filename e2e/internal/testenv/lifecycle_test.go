@@ -118,32 +118,6 @@ services:
 	require.ErrorContains(t, err, "environment is closed")
 }
 
-func TestMySQLConnectionFailureIsNotCached(t *testing.T) {
-	config := `
-services:
-  db:
-    image: mysql:8.4
-    entrypoint: ["sh", "-c", "exec sleep 120"]
-    environment:
-      MYSQL_DATABASE: test_db
-      MYSQL_USER: test_user
-      MYSQL_PASSWORD: test-secret
-    ports: ["3306"]
-`
-	path := filepath.Join(t.TempDir(), "compose.yaml")
-	require.NoError(t, os.WriteFile(path, []byte(config), 0o600))
-	ctx, cancel := context.WithTimeout(t.Context(), time.Minute)
-	defer cancel()
-	env, err := Start(ctx, path)
-	require.NoError(t, err)
-	t.Cleanup(func() { require.NoError(t, env.Close()) })
-
-	_, err = env.MySQL(ctx, "db")
-	require.ErrorContains(t, err, "connect to MySQL service")
-	require.NotContains(t, err.Error(), "test-secret")
-	require.Empty(t, env.databases)
-}
-
 func TestHTTPReadinessUsesComposeLabel(t *testing.T) {
 	config := `
 services:

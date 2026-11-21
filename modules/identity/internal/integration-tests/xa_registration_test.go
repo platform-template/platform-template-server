@@ -2,10 +2,13 @@ package integration_tests
 
 import (
 	"context"
+	"database/sql"
 	"testing"
 	"time"
 	"uuid"
 
+	"github.com/distributed-programming-2026/lib/transaction/xa"
+	mysqldriver "github.com/go-sql-driver/mysql"
 	"github.com/stretchr/testify/require"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
@@ -28,6 +31,25 @@ func countXAUser(t *testing.T, ctx context.Context, userID uuid.UUID) int {
 	require.NoError(t, err)
 
 	return count
+}
+
+func assertNoPreparedBranch(t *testing.T, ctx context.Context, transactionID uuid.UUID) {
+	t.Helper()
+	conf := testEnv.conf.MySQL
+	dsn := mysqldriver.NewConfig()
+	dsn.Net = "tcp"
+	dsn.Addr = conf.Address
+	dsn.DBName = conf.Database
+	dsn.User = "root"
+	dsn.Passwd = conf.Password
+	db, err := sql.Open("mysql", dsn.FormatDSN())
+	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, db.Close()) })
+	resource, err := xa.NewMySQL(db)
+	require.NoError(t, err)
+	prepared, err := resource.Recover(ctx)
+	require.NoError(t, err)
+	require.NotContains(t, prepared, xa.XID{TransactionID: transactionID, Branch: "identity"})
 }
 
 func TestXARegistration(t *testing.T) {
@@ -57,6 +79,7 @@ func TestXARegistration(t *testing.T) {
 		})
 		require.NoError(t, err)
 		require.Equal(t, 1, countXAUser(t, ctx, userID))
+		assertNoPreparedBranch(t, ctx, transactionID)
 
 		_, err = client.CommitRegistration(
 			ctx,
@@ -93,6 +116,7 @@ func TestXARegistration(t *testing.T) {
 		require.NoError(t, err)
 
 		require.Zero(t, countXAUser(t, ctx, userID))
+		assertNoPreparedBranch(t, ctx, transactionID)
 	})
 
 	t.Run("invalid transaction ID", func(t *testing.T) {

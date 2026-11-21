@@ -44,6 +44,13 @@ services:
       MYSQL_DATABASE: session_test
       MYSQL_USER: session
 
+  authz-mysql:
+    <<: *mysql
+    environment:
+      <<: *mysql-env
+      MYSQL_DATABASE: authz_test
+      MYSQL_USER: authz
+
   rabbitmq:
     image: rabbitmq:4.1-alpine
     environment:
@@ -107,4 +114,36 @@ services:
       identity:
         condition: service_started
       session:
+        condition: service_started
+
+  authz:
+    <<: *service
+    image: distributed-programming-authz:e2e
+    command: [service]
+    environment:
+      AUTHZ_MYSQL_ADDRESS: authz-mysql:3306
+      AUTHZ_MYSQL_DATABASE: authz_test
+      AUTHZ_MYSQL_USER: authz
+      AUTHZ_MYSQL_PASSWORD: e2e-password
+      AUTHZ_SESSION_ADDRESS: session:8081
+      AUTHZ_APP_GRACE_TIMEOUT: 2s
+    depends_on:
+      authz-mysql:
+        condition: service_healthy
+      session:
+        condition: service_started
+
+  gateway:
+    image: distributed-programming-gateway:e2e
+    ports: ["8000", "15000"]
+    volumes:
+      - ./gateway.yaml:/config/gateway.yaml:ro
+    depends_on:
+      auth:
+        condition: service_started
+      identity:
+        condition: service_started
+      session:
+        condition: service_started
+      authz:
         condition: service_started

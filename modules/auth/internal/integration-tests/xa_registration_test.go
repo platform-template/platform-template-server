@@ -70,6 +70,25 @@ func countCredentials(
 	return count
 }
 
+func assertNoPreparedBranch(t *testing.T, ctx context.Context, xid xa.XID) {
+	t.Helper()
+	conf := testEnv.conf.MySQL
+	dsn := mysqldriver.NewConfig()
+	dsn.Net = "tcp"
+	dsn.Addr = conf.Address
+	dsn.DBName = conf.Database
+	dsn.User = "root"
+	dsn.Passwd = conf.Password
+	db, err := sql.Open("mysql", dsn.FormatDSN())
+	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, db.Close()) })
+	resource, err := xa.NewMySQL(db)
+	require.NoError(t, err)
+	prepared, err := resource.Recover(ctx)
+	require.NoError(t, err)
+	require.NotContains(t, prepared, xid)
+}
+
 func TestXARegistration(t *testing.T) {
 	participant, db := newXARegistrationParticipant(t)
 
@@ -108,6 +127,7 @@ func TestXARegistration(t *testing.T) {
 		committed, err = resource.Committed(ctx, xid)
 		require.NoError(t, err)
 		require.True(t, committed)
+		assertNoPreparedBranch(t, ctx, xid)
 
 		require.Equal(t, 1, countCredentials(t, ctx, db, userID))
 
@@ -137,6 +157,7 @@ func TestXARegistration(t *testing.T) {
 
 		err = participant.Rollback(ctx, transactionID)
 		require.NoError(t, err)
+		assertNoPreparedBranch(t, ctx, xa.XID{TransactionID: transactionID, Branch: "auth"})
 
 		require.Zero(t, countCredentials(t, ctx, db, userID))
 	})
