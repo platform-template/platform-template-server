@@ -32,7 +32,7 @@ func newGRPCServer(
 	logger *slog.Logger,
 	conf config.Env,
 	svc *app.Service,
-	registration *app.RegistrationService,
+	registration app.RegistrationParticipant,
 ) (*grpc.Server, error) {
 	return grpc.NewServer(grpc.Config{
 		Address:      conf.GRPC.Address,

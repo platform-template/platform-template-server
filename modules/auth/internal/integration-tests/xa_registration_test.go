@@ -11,14 +11,14 @@ import (
 	mysqldriver "github.com/go-sql-driver/mysql"
 	"github.com/stretchr/testify/require"
 
-	"auth/internal/auth/app"
 	"auth/internal/auth/domain"
 	"auth/internal/auth/infra/password"
+	"auth/internal/auth/infra/registration"
 )
 
 func newXARegistrationParticipant(
 	t *testing.T,
-) (*app.RegistrationParticipant, *sql.DB) {
+) (*registration.RegistrationParticipant, *sql.DB) {
 	t.Helper()
 
 	conf := testEnv.conf.MySQL
@@ -43,7 +43,7 @@ func newXARegistrationParticipant(
 	resource, err := xa.NewMySQL(db)
 	require.NoError(t, err)
 
-	return app.NewRegistrationParticipant(
+	return registration.NewRegistrationParticipant(
 		resource,
 		password.NewArgon2Hasher(),
 	), db

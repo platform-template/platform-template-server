@@ -18,7 +18,7 @@ import (
 
 func NewHandler(
 	svc *app.Service,
-	registration *app.RegistrationService,
+	registration app.RegistrationParticipant,
 	logger *slog.Logger,
 ) identityinternalapi.IdentityServiceServer {
 	return &handler{
@@ -30,7 +30,7 @@ func NewHandler(
 
 type handler struct {
 	svc          *app.Service
-	registration *app.RegistrationService
+	registration app.RegistrationParticipant
 	logger       *slog.Logger
 
 	identityinternalapi.UnimplementedIdentityServiceServer

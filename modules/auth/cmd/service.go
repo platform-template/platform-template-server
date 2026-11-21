@@ -15,6 +15,7 @@ import (
 	"auth/internal/auth/infra/mysql/registrationjournal"
 	"auth/internal/auth/infra/password"
 	"auth/internal/auth/infra/recovery"
+	"auth/internal/auth/infra/registration"
 )
 
 func (a *application) serviceCmd() *cli.Command {
@@ -77,7 +78,7 @@ func service(ctx context.Context, logger *slog.Logger, conf config.Env) (err err
 	journal := registrationjournal.NewRegistrationJournal(xaDB)
 	leases := registrationjournal.NewLeaseStore(xaDB)
 
-	authParticipant := app.NewRegistrationParticipant(
+	authParticipant := registration.NewRegistrationParticipant(
 		xaResource,
 		password.NewArgon2Hasher(),
 	)

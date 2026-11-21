@@ -10,6 +10,7 @@ import (
 
 	"identity/internal/identity/app"
 	"identity/internal/identity/config"
+	"identity/internal/identity/infra/registration"
 )
 
 func (a *application) serviceCmd() *cli.Command {
@@ -53,14 +54,14 @@ func service(ctx context.Context, logger *slog.Logger, conf config.Env) (err err
 	}
 
 	svc := app.NewService(db.unit)
-	registration := app.NewRegistrationService(xaResource)
+	registrationParticipant := registration.NewRegistrationService(xaResource)
 
 	httpServer, err := newHTTPServer(logger, conf, svc)
 	if err != nil {
 		return err
 	}
 
-	grpcServer, err := newGRPCServer(logger, conf, svc, registration)
+	grpcServer, err := newGRPCServer(logger, conf, svc, registrationParticipant)
 	if err != nil {
 		return err
 	}

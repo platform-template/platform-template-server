@@ -1,4 +1,4 @@
-package app
+package registration
 
 import (
 	"context"
@@ -7,10 +7,13 @@ import (
 
 	"github.com/distributed-programming-2026/lib/transaction/xa"
 
+	"auth/internal/auth/app"
 	"auth/internal/auth/domain"
 	authmysql "auth/internal/auth/infra/mysql"
 	"auth/internal/auth/infra/mysql/repository"
 )
+
+var _ app.RegistrationAuthParticipant = (*RegistrationParticipant)(nil)
 
 const registrationBranch = "auth"
 
