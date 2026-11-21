@@ -154,11 +154,11 @@ func TestRegisterDuplicateLogin(t *testing.T) {
 	))
 	require.Equal(t, 1, countRows(
 		t, ctx, authDB,
-		"SELECT COUNT(*) FROM password_credentials WHERE login = ?", user.Login
+		"SELECT COUNT(*) FROM password_credentials WHERE login = ?", user.Login,
 	))
 	require.Zero(t, countRows(
-		t, ctx, authDB, 
-		"SELECT COUNT(*) FROM password_credentials WHERE user_id = ?", tx.userID
+		t, ctx, authDB,
+		"SELECT COUNT(*) FROM password_credentials WHERE user_id = ?", tx.userID,
 	))
 	require.Equal(t, 1, countRows(
 		t, ctx, identityDB,
