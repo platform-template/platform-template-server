@@ -19,7 +19,10 @@ type moduleGrantRepository struct {
 	client mysql.ClientContext
 }
 
-func NewModuleGrantRepository(ctx context.Context, client mysql.ClientContext) domain.ModuleGrantRepository {
+func NewModuleGrantRepository(
+	ctx context.Context,
+	client mysql.ClientContext,
+) domain.ModuleGrantRepository {
 	return &moduleGrantRepository{ctx: ctx, client: client}
 }
 
@@ -33,12 +36,19 @@ VALUES (?, ?, ?, ?)
 		return nil
 	}
 	if isDuplicateKey(err) {
-		return fmt.Errorf("%w: %v", domain.ErrModuleGrantAlreadyExists, err)
+		return fmt.Errorf(
+			"%w: %v",
+			domain.ErrModuleGrantAlreadyExists,
+			err,
+		)
 	}
 	return fmt.Errorf("store module grant: %w", err)
 }
 
-func (r *moduleGrantRepository) FindByUserIDAndModuleKey(userID uuid.UUID, moduleKey domain.ModuleKey) (*domain.ModuleGrant, error) {
+func (r *moduleGrantRepository) FindByUserIDAndModuleKey(
+	userID uuid.UUID,
+	moduleKey domain.ModuleKey,
+) (*domain.ModuleGrant, error) {
 	return r.findOne("authz.module_grant.find", `
 SELECT user_id, module_key, granted_by, granted_at
 FROM module_grants
@@ -46,13 +56,20 @@ WHERE user_id = ? AND module_key = ?
 `, userID.String(), moduleKey.String())
 }
 
-func (r *moduleGrantRepository) FindAllByUserID(userID uuid.UUID) ([]*domain.ModuleGrant, error) {
-	rows, err := r.client.QueryContext(r.ctx, "authz.module_grant.find_all", `
+func (r *moduleGrantRepository) FindAllByUserID(
+	userID uuid.UUID,
+) ([]*domain.ModuleGrant, error) {
+	rows, err := r.client.QueryContext(
+		r.ctx,
+		"authz.module_grant.find_all",
+		`
 SELECT user_id, module_key, granted_by, granted_at
 FROM module_grants
 WHERE user_id = ?
 ORDER BY module_key
-`, userID.String())
+`,
+		userID.String(),
+	)
 	if err != nil {
 		return nil, fmt.Errorf("find module grants: %w", err)
 	}
@@ -72,7 +89,10 @@ ORDER BY module_key
 	return grants, nil
 }
 
-func (r *moduleGrantRepository) Delete(userID uuid.UUID, moduleKey domain.ModuleKey) error {
+func (r *moduleGrantRepository) Delete(
+	userID uuid.UUID,
+	moduleKey domain.ModuleKey,
+) error {
 	_, err := r.client.ExecContext(r.ctx, "authz.module_grant.delete", `
 DELETE FROM module_grants
 WHERE user_id = ? AND module_key = ?
@@ -83,8 +103,13 @@ WHERE user_id = ? AND module_key = ?
 	return nil
 }
 
-func (r *moduleGrantRepository) findOne(queryID, query string, args ...any) (*domain.ModuleGrant, error) {
-	grant, err := scanModuleGrant(r.client.QueryRowContext(r.ctx, queryID, query, args...))
+func (r *moduleGrantRepository) findOne(
+	queryID, query string,
+	args ...any,
+) (*domain.ModuleGrant, error) {
+	grant, err := scanModuleGrant(
+		r.client.QueryRowContext(r.ctx, queryID, query, args...),
+	)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, nil
 	}
@@ -102,7 +127,12 @@ func scanModuleGrant(row rowScanner) (*domain.ModuleGrant, error) {
 	var userID, moduleKey string
 	var grantedBy sql.NullString
 	var grantedAt time.Time
-	if err := row.Scan(&userID, &moduleKey, &grantedBy, &grantedAt); err != nil {
+	if err := row.Scan(
+		&userID,
+		&moduleKey,
+		&grantedBy,
+		&grantedAt,
+	); err != nil {
 		return nil, err
 	}
 	parsedUserID, err := uuid.Parse(userID)
@@ -121,7 +151,12 @@ func scanModuleGrant(row rowScanner) (*domain.ModuleGrant, error) {
 		}
 		parsedGrantedBy = &issuer
 	}
-	grant, err := domain.NewModuleGrant(parsedUserID, parsedModuleKey, parsedGrantedBy, grantedAt)
+	grant, err := domain.NewModuleGrant(
+		parsedUserID,
+		parsedModuleKey,
+		parsedGrantedBy,
+		grantedAt,
+	)
 	if err != nil {
 		return nil, fmt.Errorf("restore module grant: %w", err)
 	}

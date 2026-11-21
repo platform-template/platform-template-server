@@ -1,0 +1,59 @@
+openapi: 3.0.0
+info:
+  title: Authz service API
+  version: 1.0.0
+  x-api-identifier: authzpublicapi
+paths:
+  /api/v1/authz/grants:
+    post:
+      operationId: grantAccess
+      security:
+        - sessionAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/grantAccessRequest"
+      responses:
+        "204": { description: Access granted }
+        "400": { description: Invalid request }
+        "401": { description: Authentication required }
+        "403": { description: Permission denied }
+        "500": { description: Internal server error }
+  /api/v1/authz/grants/{user_id}/{module_key}:
+    delete:
+      operationId: revokeAccess
+      security:
+        - sessionAuth: []
+      parameters:
+        - name: user_id
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+        - name: module_key
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        "204": { description: Access revoked }
+        "400": { description: Invalid request }
+        "401": { description: Authentication required }
+        "403": { description: Permission denied }
+        "500": { description: Internal server error }
+components:
+  securitySchemes:
+    sessionAuth:
+      type: apiKey
+      in: cookie
+      name: session
+  schemas:
+    grantAccessRequest:
+      type: object
+      required: [target_user_id, module_key]
+      properties:
+        target_user_id:
+          type: string
+          format: uuid
+        module_key:
+          type: string

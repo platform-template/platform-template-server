@@ -15,7 +15,16 @@ func TestNewModuleGrant(t *testing.T) {
 	moduleKey, err := NewModuleKey(" Meal_Planner ")
 	require.NoError(t, err)
 
-	grantedAt := time.Date(2026, 11, 21, 12, 0, 0, 0, time.FixedZone("UTC+3", 3*60*60))
+	grantedAt := time.Date(
+		2026,
+		11,
+		21,
+		12,
+		0,
+		0,
+		0,
+		time.FixedZone("UTC+3", 3*60*60),
+	)
 	grant, err := NewModuleGrant(userID, moduleKey, &grantedBy, grantedAt)
 	require.NoError(t, err)
 
@@ -49,7 +58,12 @@ func TestNewModuleGrantValidatesItsInvariants(t *testing.T) {
 	_, err = NewModuleGrant(uuid.New(), moduleKey, nil, time.Time{})
 	require.ErrorIs(t, err, ErrInvalidGrantedAt)
 
-	_, err = NewModuleGrant(uuid.New(), ModuleKey("not valid"), nil, time.Now())
+	_, err = NewModuleGrant(
+		uuid.New(),
+		ModuleKey("not valid"),
+		nil,
+		time.Now(),
+	)
 	require.ErrorIs(t, err, ErrInvalidModuleKey)
 }
 
@@ -76,7 +90,12 @@ func TestSystemRoles(t *testing.T) {
 }
 
 func TestEntityRestorationUsesTheSameInvariants(t *testing.T) {
-	_, err := NewModuleGrant(uuid.Nil(), ModuleKey("inventory"), nil, time.Now())
+	_, err := NewModuleGrant(
+		uuid.Nil(),
+		ModuleKey("inventory"),
+		nil,
+		time.Now(),
+	)
 	require.ErrorIs(t, err, ErrInvalidUserID)
 
 	_, err = NewSystemRoleAssignment(uuid.New(), SystemRole("broken"))

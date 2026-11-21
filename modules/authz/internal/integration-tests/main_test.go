@@ -21,7 +21,13 @@ var testClient mysqlsdk.TransactionalClient
 func TestMain(m *testing.M) {
 	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
 
-	container, err := tcmysql.Run(ctx, "mysql:8.4", tcmysql.WithDatabase("authz_test"), tcmysql.WithUsername("authz"), tcmysql.WithPassword("integration-password"))
+	container, err := tcmysql.Run(
+		ctx,
+		"mysql:8.4",
+		tcmysql.WithDatabase("authz_test"),
+		tcmysql.WithUsername("authz"),
+		tcmysql.WithPassword("integration-password"),
+	)
 	if err != nil {
 		cancel()
 		os.Exit(1)
@@ -40,7 +46,10 @@ func TestMain(m *testing.M) {
 	}
 	config.ParseTime = true
 	connector := mysqlsdk.NewConnector()
-	if err := connector.Open(config.FormatDSN(), mysqlsdk.Config{MaxConnections: 16}); err != nil {
+	if err := connector.Open(
+		config.FormatDSN(),
+		mysqlsdk.Config{MaxConnections: 16},
+	); err != nil {
 		_ = container.Terminate(context.Background())
 		cancel()
 		os.Exit(1)
@@ -48,7 +57,11 @@ func TestMain(m *testing.M) {
 
 	testClient = connector.TransactionalClient()
 	runner, err := migrator.New(testClient, slog.Default())
-	if err != nil || runner.Migrate(ctx, "authz", migrations.Database(testClient)...) != nil {
+	if err != nil ||
+		runner.Migrate(
+			ctx,
+			"authz",
+			migrations.Database(testClient)...) != nil {
 		_ = connector.Close()
 		_ = container.Terminate(context.Background())
 		cancel()
@@ -63,8 +76,16 @@ func TestMain(m *testing.M) {
 
 func clearTables(t *testing.T) {
 	t.Helper()
-	_, err := testClient.ExecContext(t.Context(), "test.authz.clear_grants", "DELETE FROM module_grants")
+	_, err := testClient.ExecContext(
+		t.Context(),
+		"test.authz.clear_grants",
+		"DELETE FROM module_grants",
+	)
 	require.NoError(t, err)
-	_, err = testClient.ExecContext(t.Context(), "test.authz.clear_roles", "DELETE FROM system_roles")
+	_, err = testClient.ExecContext(
+		t.Context(),
+		"test.authz.clear_roles",
+		"DELETE FROM system_roles",
+	)
 	require.NoError(t, err)
 }

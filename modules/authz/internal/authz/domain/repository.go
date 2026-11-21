@@ -14,3 +14,7 @@ type SystemRoleRepository interface {
 	Store(*SystemRoleAssignment) error
 	Delete(uuid.UUID) error
 }
+
+type InitialSuperuserRepository interface {
+	Bootstrap(*SystemRoleAssignment) error
+}

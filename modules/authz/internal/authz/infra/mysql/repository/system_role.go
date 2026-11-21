@@ -17,11 +17,16 @@ type systemRoleRepository struct {
 	client mysql.ClientContext
 }
 
-func NewSystemRoleRepository(ctx context.Context, client mysql.ClientContext) domain.SystemRoleRepository {
+func NewSystemRoleRepository(
+	ctx context.Context,
+	client mysql.ClientContext,
+) domain.SystemRoleRepository {
 	return &systemRoleRepository{ctx: ctx, client: client}
 }
 
-func (r *systemRoleRepository) Store(assignment *domain.SystemRoleAssignment) error {
+func (r *systemRoleRepository) Store(
+	assignment *domain.SystemRoleAssignment,
+) error {
 	data := assignment.Data()
 	_, err := r.client.ExecContext(r.ctx, "authz.system_role.store", `
 INSERT INTO system_roles (user_id, role)
@@ -34,7 +39,9 @@ ON DUPLICATE KEY UPDATE role = ?
 	return nil
 }
 
-func (r *systemRoleRepository) FindByUserID(userID uuid.UUID) (*domain.SystemRoleAssignment, error) {
+func (r *systemRoleRepository) FindByUserID(
+	userID uuid.UUID,
+) (*domain.SystemRoleAssignment, error) {
 	var storedUserID, storedRole string
 	err := r.client.QueryRowContext(r.ctx, "authz.system_role.find", `
 SELECT user_id, role

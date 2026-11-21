@@ -24,7 +24,10 @@ func (v version1791225168) Description() string {
 }
 
 func (v version1791225168) Up(ctx context.Context) error {
-	_, err := v.client.ExecContext(ctx, "authz.create_module_grants_table", `
+	_, err := v.client.ExecContext(
+		ctx,
+		"authz.create_module_grants_table",
+		`
 CREATE TABLE IF NOT EXISTS module_grants (
     user_id CHAR(36) CHARACTER SET ascii NOT NULL,
     module_key VARCHAR(255) CHARACTER SET ascii NOT NULL,
@@ -33,7 +36,8 @@ CREATE TABLE IF NOT EXISTS module_grants (
     PRIMARY KEY (user_id, module_key),
     INDEX idx_module_grants_user_id (user_id)
 ) ENGINE=InnoDB CHARACTER SET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
-`)
+`,
+	)
 	if err != nil {
 		return err
 	}

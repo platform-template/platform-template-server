@@ -7,7 +7,12 @@ import (
 
 var (
 	ErrInvalidSystemRole     = errors.New("invalid system role")
-	ErrDefaultRoleAssignment = errors.New("default user role must not be stored")
+	ErrDefaultRoleAssignment = errors.New(
+		"default user role must not be stored",
+	)
+	ErrInitialSuperuserExists = errors.New(
+		"initial superuser already exists",
+	)
 )
 
 type SystemRole string
@@ -41,7 +46,10 @@ type SystemRoleAssignmentData struct {
 	Role   SystemRole
 }
 
-func NewSystemRoleAssignment(userID uuid.UUID, role SystemRole) (*SystemRoleAssignment, error) {
+func NewSystemRoleAssignment(
+	userID uuid.UUID,
+	role SystemRole,
+) (*SystemRoleAssignment, error) {
 	if userID == uuid.Nil() {
 		return nil, ErrInvalidUserID
 	}

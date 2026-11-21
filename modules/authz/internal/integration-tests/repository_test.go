@@ -11,6 +11,7 @@ import (
 	"github.com/distributed-programming-2026/go-sdk/pkg/uow"
 	"github.com/stretchr/testify/require"
 
+	"authz/internal/authz/app"
 	"authz/internal/authz/domain"
 	authzmysql "authz/internal/authz/infra/mysql"
 	"authz/internal/authz/infra/mysql/repository"
@@ -28,7 +29,10 @@ func TestModuleGrantRepositoryStoreFindListAndDelete(t *testing.T) {
 	grantedAt := time.Date(2026, 11, 21, 10, 0, 0, 0, time.UTC)
 	grant := mustGrant(t, userID, inventory, &issuerID, grantedAt)
 	require.NoError(t, repo.Store(grant))
-	require.NoError(t, repo.Store(mustGrant(t, userID, shopping, nil, grantedAt)))
+	require.NoError(
+		t,
+		repo.Store(mustGrant(t, userID, shopping, nil, grantedAt)),
+	)
 
 	found, err := repo.FindByUserIDAndModuleKey(userID, inventory)
 	require.NoError(t, err)
@@ -50,9 +54,19 @@ func TestModuleGrantRepositoryStoreFindListAndDelete(t *testing.T) {
 func TestModuleGrantRepositoryEnforcesUniquePair(t *testing.T) {
 	clearTables(t)
 	repo := repository.NewModuleGrantRepository(t.Context(), testClient)
-	grant := mustGrant(t, uuid.New(), mustModuleKey(t, "inventory"), nil, time.Now())
+	grant := mustGrant(
+		t,
+		uuid.New(),
+		mustModuleKey(t, "inventory"),
+		nil,
+		time.Now(),
+	)
 	require.NoError(t, repo.Store(grant))
-	require.ErrorIs(t, repo.Store(grant), domain.ErrModuleGrantAlreadyExists)
+	require.ErrorIs(
+		t,
+		repo.Store(grant),
+		domain.ErrModuleGrantAlreadyExists,
+	)
 }
 
 func TestSystemRoleRepositoryStoreFindAndDefaultRoleAbsence(t *testing.T) {
@@ -64,7 +78,10 @@ func TestSystemRoleRepositoryStoreFindAndDefaultRoleAbsence(t *testing.T) {
 	require.NoError(t, err)
 	require.Nil(t, assignment)
 
-	superuser, err := domain.NewSystemRoleAssignment(userID, domain.SystemRoleSuperuser)
+	superuser, err := domain.NewSystemRoleAssignment(
+		userID,
+		domain.SystemRoleSuperuser,
+	)
 	require.NoError(t, err)
 	require.NoError(t, repo.Store(superuser))
 	require.NoError(t, repo.Store(superuser))
@@ -73,7 +90,11 @@ func TestSystemRoleRepositoryStoreFindAndDefaultRoleAbsence(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, superuser.Data(), assignment.Data())
 	var count int
-	require.NoError(t, testClient.QueryRowContext(t.Context(), "test.authz.role_count", "SELECT COUNT(*) FROM system_roles WHERE user_id = ?", userID.String()).Scan(&count))
+	require.NoError(
+		t,
+		testClient.QueryRowContext(t.Context(), "test.authz.role_count", "SELECT COUNT(*) FROM system_roles WHERE user_id = ?", userID.String()).
+			Scan(&count),
+	)
 	require.Equal(t, 1, count)
 }
 
@@ -81,24 +102,38 @@ func TestUnitOfWorkRollsBackModuleGrant(t *testing.T) {
 	clearTables(t)
 	userID := uuid.New()
 	moduleKey := mustModuleKey(t, "inventory")
-	unit := uow.NewUnitOfWork(mysql.NewConnectionPool(testClient), authzmysql.NewRepositoryProvider)
+	unit := uow.NewUnitOfWork(
+		mysql.NewConnectionPool(testClient),
+		authzmysql.NewRepositoryProvider,
+	)
 	expected := errors.New("abort transaction")
-	err := unit.ExecuteWithRepositoryProvider(context.Background(), func(provider *authzmysql.RepositoryProvider) error {
-		if err := provider.ModuleGrant(context.Background()).Store(mustGrant(t, userID, moduleKey, nil, time.Now())); err != nil {
-			return err
-		}
-		return expected
-	})
+	err := unit.ExecuteWithRepositoryProvider(
+		context.Background(),
+		func(provider *authzmysql.RepositoryProvider) error {
+			if err := provider.ModuleGrant(context.Background()).
+				Store(mustGrant(t, userID, moduleKey, nil, time.Now())); err != nil {
+				return err
+			}
+			return expected
+		},
+	)
 	require.ErrorIs(t, err, expected)
 
-	found, err := repository.NewModuleGrantRepository(t.Context(), testClient).FindByUserIDAndModuleKey(userID, moduleKey)
+	found, err := repository.NewModuleGrantRepository(t.Context(), testClient).
+		FindByUserIDAndModuleKey(userID, moduleKey)
 	require.NoError(t, err)
 	require.Nil(t, found)
 }
 
 func TestModuleGrantRepositoryConcurrentStoreKeepsOneRecord(t *testing.T) {
 	clearTables(t)
-	grant := mustGrant(t, uuid.New(), mustModuleKey(t, "notifications"), nil, time.Now())
+	grant := mustGrant(
+		t,
+		uuid.New(),
+		mustModuleKey(t, "notifications"),
+		nil,
+		time.Now(),
+	)
 	const workers = 8
 	errs := make(chan error, workers)
 	var group sync.WaitGroup
@@ -122,9 +157,95 @@ func TestModuleGrantRepositoryConcurrentStoreKeepsOneRecord(t *testing.T) {
 	}
 	require.Equal(t, 1, successes)
 
-	grants, err := repository.NewModuleGrantRepository(t.Context(), testClient).FindAllByUserID(grant.Data().UserID)
+	grants, err := repository.NewModuleGrantRepository(t.Context(), testClient).
+		FindAllByUserID(grant.Data().UserID)
 	require.NoError(t, err)
 	require.Len(t, grants, 1)
+}
+
+func TestApplicationGrantRevokeCheckAndBootstrap(t *testing.T) {
+	clearTables(t)
+	unit := uow.NewUnitOfWork(
+		mysql.NewConnectionPool(testClient),
+		authzmysql.NewRepositoryProvider,
+	)
+	svc := app.NewService(unit)
+	superuserID, userID := uuid.New(), uuid.New()
+	require.NoError(t, svc.BootstrapSuperuser(t.Context(), superuserID))
+	require.NoError(t, svc.BootstrapSuperuser(t.Context(), superuserID))
+	require.ErrorIs(
+		t,
+		svc.BootstrapSuperuser(t.Context(), uuid.New()),
+		domain.ErrInitialSuperuserExists,
+	)
+	require.NoError(
+		t,
+		svc.GrantAccess(t.Context(), superuserID, userID, "inventory"),
+	)
+	require.NoError(
+		t,
+		svc.GrantAccess(t.Context(), superuserID, userID, "inventory"),
+	)
+	allowed, err := svc.CheckAccess(t.Context(), userID, "inventory")
+	require.NoError(t, err)
+	require.True(t, allowed)
+	allowed, err = svc.CheckAccess(t.Context(), superuserID, "any_module")
+	require.NoError(t, err)
+	require.True(t, allowed)
+	require.ErrorIs(
+		t,
+		svc.GrantAccess(t.Context(), userID, userID, "shopping"),
+		app.ErrPermissionDenied,
+	)
+	require.NoError(
+		t,
+		svc.RevokeAccess(t.Context(), superuserID, userID, "inventory"),
+	)
+	require.NoError(
+		t,
+		svc.RevokeAccess(t.Context(), superuserID, userID, "inventory"),
+	)
+	allowed, err = svc.CheckAccess(t.Context(), userID, "inventory")
+	require.NoError(t, err)
+	require.False(t, allowed)
+}
+
+func TestBootstrapSuperuserIsConcurrentSafe(t *testing.T) {
+	clearTables(t)
+	const workers = 6
+	errs := make(chan error, workers)
+	var group sync.WaitGroup
+	for range workers {
+		group.Add(1)
+		go func() {
+			defer group.Done()
+			ctx, cancel := context.WithCancel(context.Background())
+			defer cancel()
+			unit := uow.NewUnitOfWork(
+				mysql.NewConnectionPool(testClient),
+				authzmysql.NewRepositoryProvider,
+			)
+			errs <- app.NewService(unit).BootstrapSuperuser(ctx, uuid.New())
+		}()
+	}
+	group.Wait()
+	close(errs)
+	successes := 0
+	for err := range errs {
+		if err == nil {
+			successes++
+			continue
+		}
+		require.ErrorIs(t, err, domain.ErrInitialSuperuserExists)
+	}
+	require.Equal(t, 1, successes)
+	var count int
+	require.NoError(
+		t,
+		testClient.QueryRowContext(t.Context(), "test.authz.initial_superuser_count", "SELECT COUNT(*) FROM system_roles WHERE role = 'superuser'").
+			Scan(&count),
+	)
+	require.Equal(t, 1, count)
 }
 
 func mustModuleKey(t *testing.T, value string) domain.ModuleKey {
@@ -134,7 +255,13 @@ func mustModuleKey(t *testing.T, value string) domain.ModuleKey {
 	return key
 }
 
-func mustGrant(t *testing.T, userID uuid.UUID, key domain.ModuleKey, issuer *uuid.UUID, grantedAt time.Time) *domain.ModuleGrant {
+func mustGrant(
+	t *testing.T,
+	userID uuid.UUID,
+	key domain.ModuleKey,
+	issuer *uuid.UUID,
+	grantedAt time.Time,
+) *domain.ModuleGrant {
 	t.Helper()
 	grant, err := domain.NewModuleGrant(userID, key, issuer, grantedAt)
 	require.NoError(t, err)

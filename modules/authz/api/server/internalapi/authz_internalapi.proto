@@ -1,0 +1,41 @@
+syntax = "proto3";
+package authzInternalAPI;
+
+option go_package = "/.;authzinternalapi";
+
+service AuthzService {
+  rpc CheckAccess(CheckAccessRequest) returns (CheckAccessResponse);
+  rpc ListAccess(ListAccessRequest) returns (ListAccessResponse);
+  rpc IsSuperuser(IsSuperuserRequest) returns (IsSuperuserResponse);
+}
+
+message CheckAccessRequest {
+  string user_id = 1;
+  string module_key = 2;
+}
+
+message CheckAccessResponse {
+  bool allowed = 1;
+}
+
+message ListAccessRequest {
+  string user_id = 1;
+}
+
+message ModuleGrant {
+  string user_id = 1;
+  string module_key = 2;
+  optional string granted_by = 3;
+  string granted_at = 4;
+}
+
+message ListAccessResponse {
+  repeated ModuleGrant grants = 1;
+  bool is_superuser = 2;
+}
+
+message IsSuperuserRequest {}
+
+message IsSuperuserResponse {
+  bool is_superuser = 1;
+}
