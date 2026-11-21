@@ -1,0 +1,3 @@
+CREATE DATABASE IF NOT EXISTS `authz` CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
+CREATE USER IF NOT EXISTS 'authz'@'%' IDENTIFIED BY 'authz';
+GRANT ALL PRIVILEGES ON `authz`.* TO 'authz'@'%';
