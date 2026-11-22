@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"log/slog"
+	"time"
 
 	"github.com/distributed-programming-2026/go-sdk/pkg/mysql"
 	"github.com/distributed-programming-2026/go-sdk/pkg/uow"
@@ -26,6 +27,7 @@ func openDatabase(ctx context.Context, logger *slog.Logger, conf config.Env) (_ 
 	dsn.User = conf.MySQL.User
 	dsn.Passwd = conf.MySQL.Password
 	dsn.ParseTime = true
+	dsn.Loc = time.UTC
 	dsn.Timeout = conf.MySQL.ConnectTimeout
 	dsn.ReadTimeout = conf.MySQL.ReadTimeout
 	dsn.WriteTimeout = conf.MySQL.WriteTimeout
