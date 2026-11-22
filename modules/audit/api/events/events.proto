@@ -1,0 +1,9 @@
+syntax = "proto3";
+package auditEvents;
+
+option go_package = "/.;auditevents";
+
+message Echo {
+  string ID = 1;
+  string Body = 2;
+}

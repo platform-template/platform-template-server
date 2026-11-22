@@ -1,0 +1,14 @@
+kind: gateway/service/v1
+name: audit
+weight: 100
+routes:
+  - pattern: '^/audit/api/.*$'
+    rewrite:
+      old: '^/audit/(.*)$'
+      new: '/$1'
+    target: audit-service:8082
+    interceptors:
+      - id: audit-interceptor
+        processingMode:
+          requestHeaders: true
+          responseHeaders: true

@@ -2,6 +2,7 @@ go 1.27.1
 
 use (
 	./e2e
+	./modules/audit
 	./modules/auth
 	./modules/authz
 	./modules/identity
