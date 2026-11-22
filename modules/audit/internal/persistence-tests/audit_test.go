@@ -152,20 +152,60 @@ func TestStorageConstraints(t *testing.T) {
 		name   string
 		change func(*domain.AuditEntryData)
 	}{
-		{"event id too long", func(data *domain.AuditEntryData) { data.EventID = strings.Repeat("a", 256) }},
-		{"module too long", func(data *domain.AuditEntryData) { data.ModuleKey = strings.Repeat("a", 129) }},
-		{"action too long", func(data *domain.AuditEntryData) { data.Action = strings.Repeat("a", 129) }},
-		{"target type too long", func(data *domain.AuditEntryData) { data.TargetType = strings.Repeat("a", 129) }},
-		{"target id too long", func(data *domain.AuditEntryData) { data.TargetID = strings.Repeat("a", 256) }},
-		{"correlation too long", func(data *domain.AuditEntryData) { data.CorrelationID = strings.Repeat("a", 256) }},
-		{"invalid string encoding", func(data *domain.AuditEntryData) { data.EventID = string([]byte{0xff}) }},
+		{
+			name: "event id too long",
+			change: func(data *domain.AuditEntryData) {
+				data.EventID = strings.Repeat("a", 256)
+			},
+		},
+		{
+			name: "module too long",
+			change: func(data *domain.AuditEntryData) {
+				data.ModuleKey = strings.Repeat("a", 129)
+			},
+		},
+		{
+			name: "action too long",
+			change: func(data *domain.AuditEntryData) {
+				data.Action = strings.Repeat("a", 129)
+			},
+		},
+		{
+			name: "target type too long",
+			change: func(data *domain.AuditEntryData) {
+				data.TargetType = strings.Repeat("a", 129)
+			},
+		},
+		{
+			name: "target id too long",
+			change: func(data *domain.AuditEntryData) {
+				data.TargetID = strings.Repeat("a", 256)
+			},
+		},
+		{
+			name: "correlation too long",
+			change: func(data *domain.AuditEntryData) {
+				data.CorrelationID = strings.Repeat("a", 256)
+			},
+		},
+		{
+			name: "invalid string encoding",
+			change: func(data *domain.AuditEntryData) {
+				data.EventID = string([]byte{0xff})
+			},
+		},
 		{
 			name: "metadata too large",
 			change: func(data *domain.AuditEntryData) {
 				data.Metadata = []byte(`"` + strings.Repeat("a", 16383) + `"`)
 			},
 		},
-		{"invalid metadata encoding", func(data *domain.AuditEntryData) { data.Metadata = []byte{'"', 0xff, '"'} }},
+		{
+			name: "invalid metadata encoding",
+			change: func(data *domain.AuditEntryData) {
+				data.Metadata = []byte{'"', 0xff, '"'}
+			},
+		},
 		{
 			name: "occurred before mysql range",
 			change: func(data *domain.AuditEntryData) {

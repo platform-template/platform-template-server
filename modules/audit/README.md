@@ -10,6 +10,12 @@ Metadata содержит валидный JSON размером до 16 КиБ;
 
 Репозиторий не предоставляет изменение или удаление записей; это ограничение приложения, а не защита от прямого SQL пользователя с соответствующими правами. Дедупликация EventID обеспечивается первичным ключом MySQL.
 
+## Чтение журнала
+
+`GET /api/public/v1/audit/entries` возвращает записи с фильтрами `actorId`, `moduleKey`, `action`, `targetType`, `targetId`, `from`, `to`, `limit` и `offset`. `GET /api/public/v1/audit/entries/by-event-id?eventId=...` возвращает одну запись. Через Gateway пути начинаются с `/audit/`.
+
+Audit передаёт cookie `session` в Authz `IsSuperuser`; Authz проверяет её через Session. Чтение доступно только Superuser с глобальными привилегиями. Назначение доступа к модулю `audit` само по себе пока не даёт доступа к журналу: отдельная политика чтения журнала не определена. При недоступности Authz или Session доступ закрыт. Проверка действует и при прямом запросе к Audit. Внутренние gRPC-соединения платформы должны оставаться в доверенной сети: межсервисная аутентификация и шифрование пока не настроены.
+
 Рабочий пример использования go-sdk и исходник для генератора новых модулей.
 
 ## Сценарий
@@ -121,6 +127,7 @@ curl -X POST localhost/audit/api/public/v1/echo \
 | `AUDIT_APP_GRACE_TIMEOUT` | `30s` |
 | `AUDIT_HTTP_ADDRESS` | `:8082` |
 | `AUDIT_GRPC_ADDRESS` | `:8081` |
+| `AUDIT_AUTHZ_ADDRESS` | `authz-service:8081` |
 | `AUDIT_MYSQL_ADDRESS` | `localhost:3306` |
 | `AUDIT_MYSQL_DATABASE` | `audit` |
 | `AUDIT_MYSQL_USER` | `audit` |

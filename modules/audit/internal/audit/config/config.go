@@ -12,6 +12,11 @@ type Env struct {
 	MySQL MySQL `envconfig:"mysql"`
 	AMQP  AMQP  `envconfig:"amqp"`
 	Relay Relay `envconfig:"relay"`
+	Authz Authz `envconfig:"authz"`
+}
+
+type Authz struct {
+	Address string `envconfig:"address" default:"authz-service:8081"`
 }
 
 type App struct {
@@ -70,7 +75,7 @@ func (c Env) Validate() error {
 	if c.MySQL.Address == "" || c.MySQL.Database == "" || c.MySQL.User == "" || c.AMQP.URL == "" ||
 		c.AMQP.Queue == "" ||
 		c.HTTP.Address == "" ||
-		c.GRPC.Address == "" {
+		c.GRPC.Address == "" || c.Authz.Address == "" {
 		return errors.New("database, broker and server configuration must not be empty")
 	}
 	return nil

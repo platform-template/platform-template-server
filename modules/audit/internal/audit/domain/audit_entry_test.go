@@ -21,11 +21,36 @@ func TestAuditEntryValidation(t *testing.T) {
 		name   string
 		change func(*AuditEntryData)
 	}{
-		{name: "missing event", change: func(data *AuditEntryData) { data.EventID = "" }},
-		{name: "missing module", change: func(data *AuditEntryData) { data.ModuleKey = " " }},
-		{name: "missing action", change: func(data *AuditEntryData) { data.Action = "" }},
-		{name: "missing time", change: func(data *AuditEntryData) { data.OccurredAt = time.Time{} }},
-		{name: "invalid JSON", change: func(data *AuditEntryData) { data.Metadata = []byte(`{`) }},
+		{
+			name: "missing event",
+			change: func(data *AuditEntryData) {
+				data.EventID = ""
+			},
+		},
+		{
+			name: "missing module",
+			change: func(data *AuditEntryData) {
+				data.ModuleKey = " "
+			},
+		},
+		{
+			name: "missing action",
+			change: func(data *AuditEntryData) {
+				data.Action = ""
+			},
+		},
+		{
+			name: "missing time",
+			change: func(data *AuditEntryData) {
+				data.OccurredAt = time.Time{}
+			},
+		},
+		{
+			name: "invalid JSON",
+			change: func(data *AuditEntryData) {
+				data.Metadata = []byte(`{`)
+			},
+		},
 		{
 			name: "zero actor",
 			change: func(data *AuditEntryData) {

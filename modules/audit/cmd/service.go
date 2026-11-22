@@ -3,10 +3,15 @@ package main
 import (
 	"context"
 	"errors"
+	"fmt"
 	"log/slog"
 
 	"github.com/urfave/cli/v3"
 	"golang.org/x/sync/errgroup"
+	grpcclient "google.golang.org/grpc"
+	"google.golang.org/grpc/credentials/insecure"
+
+	authzapi "authz/api/server/internalapi"
 
 	"audit/internal/audit/app"
 	"audit/internal/audit/config"
@@ -48,7 +53,15 @@ func service(ctx context.Context, logger *slog.Logger, conf config.Env) (err err
 
 	dispatcherFactory := eventinfra.NewDispatcherFactory(appID, dispatcher)
 	svc := app.NewService(db.unit, dispatcherFactory)
-	httpServer, err := newHTTPServer(logger, conf, svc)
+	authzConn, err := grpcclient.NewClient(
+		conf.Authz.Address,
+		grpcclient.WithTransportCredentials(insecure.NewCredentials()),
+	)
+	if err != nil {
+		return fmt.Errorf("create authz client: %w", err)
+	}
+	defer func() { err = errors.Join(err, authzConn.Close()) }()
+	httpServer, err := newHTTPServer(logger, conf, svc, authzapi.NewAuthzServiceClient(authzConn))
 	if err != nil {
 		return err
 	}

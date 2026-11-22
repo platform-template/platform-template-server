@@ -84,3 +84,33 @@ func TestInvalidHTTPRequests(t *testing.T) {
 		require.Equal(t, http.StatusBadRequest, response.StatusCode)
 	}
 }
+
+func TestAuditBackendFailsClosedWithoutAuthz(t *testing.T) {
+	client := &http.Client{Timeout: 6 * time.Second}
+	for _, test := range []struct {
+		name   string
+		token  string
+		status int
+	}{
+		{name: "missing session", status: http.StatusUnauthorized},
+		{
+			name:   "authz unavailable",
+			token:  "unverified",
+			status: http.StatusServiceUnavailable,
+		},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			request, err := http.NewRequestWithContext(t.Context(), http.MethodGet,
+				"http://"+testEnv.conf.HTTP.Address+"/api/public/v1/audit/entries", http.NoBody)
+			require.NoError(t, err)
+			request.Header.Set("X-User-ID", "spoofed")
+			if test.token != "" {
+				request.Header.Set("Cookie", "session="+test.token)
+			}
+			response, err := client.Do(request)
+			require.NoError(t, err)
+			require.NoError(t, response.Body.Close())
+			require.Equal(t, test.status, response.StatusCode)
+		})
+	}
+}

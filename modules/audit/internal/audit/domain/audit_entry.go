@@ -11,6 +11,7 @@ import (
 var (
 	ErrInvalidAuditEntry   = errors.New("invalid audit entry")
 	ErrAuditEntryDuplicate = errors.New("audit entry already exists")
+	ErrAuditEntryNotFound  = errors.New("audit entry not found")
 	ErrInvalidAuditFilter  = errors.New("invalid audit filter")
 )
 

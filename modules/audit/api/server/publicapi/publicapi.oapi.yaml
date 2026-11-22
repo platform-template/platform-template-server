@@ -4,6 +4,94 @@ info:
   title: Audit service public API
   x-api-identifier: auditpublicapi
 paths:
+  /api/public/v1/audit/entries:
+    get:
+      operationId: listAuditEntries
+      parameters:
+        - name: actorId
+          in: query
+          schema:
+            type: string
+            format: uuid
+        - name: moduleKey
+          in: query
+          schema:
+            type: string
+        - name: action
+          in: query
+          schema:
+            type: string
+        - name: targetType
+          in: query
+          schema:
+            type: string
+        - name: targetId
+          in: query
+          schema:
+            type: string
+        - name: from
+          in: query
+          schema:
+            type: string
+            format: date-time
+        - name: to
+          in: query
+          schema:
+            type: string
+            format: date-time
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 100
+            default: 20
+        - name: offset
+          in: query
+          schema:
+            type: integer
+            minimum: 0
+            default: 0
+      responses:
+        "200":
+          description: Audit entries
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [entries]
+                properties:
+                  entries:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/auditEntry"
+        "400": { description: Invalid parameters }
+        "401": { description: Invalid session }
+        "403": { description: Permission denied }
+        "500": { description: Internal error }
+        "503": { description: Authorization unavailable }
+  /api/public/v1/audit/entries/by-event-id:
+    get:
+      operationId: getAuditEntry
+      parameters:
+        - name: eventId
+          in: query
+          required: true
+          schema:
+            type: string
+            minLength: 1
+      responses:
+        "200":
+          description: Audit entry
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/auditEntry" }
+        "400": { description: Invalid parameters }
+        "401": { description: Invalid session }
+        "403": { description: Permission denied }
+        "404": { description: Entry not found }
+        "500": { description: Internal error }
+        "503": { description: Authorization unavailable }
   /api/public/v1/echo:
     post:
       operationId: echo
@@ -22,6 +110,32 @@ paths:
                 $ref: "#/components/schemas/echoResponseData"
 components:
   schemas:
+    auditEntry:
+      type: object
+      required: [eventId, moduleKey, action, metadata, occurredAt, recordedAt]
+      properties:
+        eventId:
+          type: string
+        actorId:
+          type: string
+          format: uuid
+        moduleKey:
+          type: string
+        action:
+          type: string
+        targetType:
+          type: string
+        targetId:
+          type: string
+        correlationId:
+          type: string
+        metadata: {}
+        occurredAt:
+          type: string
+          format: date-time
+        recordedAt:
+          type: string
+          format: date-time
     echoRequest:
       type: object
       properties:

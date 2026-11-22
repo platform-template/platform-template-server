@@ -3,6 +3,8 @@ package main
 import (
 	"log/slog"
 
+	authzapi "authz/api/server/internalapi"
+
 	gatewayapi "github.com/distributed-programming-2026/lib/gateway/interceptor"
 	grpcserver "google.golang.org/grpc"
 	"google.golang.org/grpc/reflection"
@@ -18,8 +20,13 @@ import (
 	publichandler "audit/internal/audit/infra/handlers/public"
 )
 
-func newHTTPServer(logger *slog.Logger, conf config.Env, svc *app.Service) (*http.Server, error) {
-	register, err := publichandler.Register(svc, logger)
+func newHTTPServer(
+	logger *slog.Logger,
+	conf config.Env,
+	svc *app.Service,
+	authz authzapi.AuthzServiceClient,
+) (*http.Server, error) {
+	register, err := publichandler.Register(svc, logger, authz)
 	if err != nil {
 		return nil, err
 	}
