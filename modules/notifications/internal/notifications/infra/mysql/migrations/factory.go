@@ -6,15 +6,16 @@ import (
 )
 
 func Database(client mysql.ClientContext) []migrator.Migration {
-	m := make([]migrator.Migration, 0, len(migrations))
-	for _, buildFunc := range migrations {
-		m = append(m, buildFunc(client))
+	result := make([]migrator.Migration, 0, len(migrations))
+	for _, build := range migrations {
+		result = append(result, build(client))
 	}
-	return m
+	return result
 }
 
-type mysqlMigration func(client mysql.ClientContext) migrator.Migration
+type mysqlMigration func(mysql.ClientContext) migrator.Migration
 
 var migrations = []mysqlMigration{
 	Version1791225168,
+	Version1800000000,
 }

@@ -25,7 +25,10 @@ type handler struct {
 	notificationsinternalapi.UnimplementedNotificationsServiceServer
 }
 
-func (h handler) Echo(ctx context.Context, req *notificationsinternalapi.EchoRequest) (*notificationsinternalapi.EchoResponse, error) {
+func (h handler) Echo(
+	ctx context.Context,
+	req *notificationsinternalapi.EchoRequest,
+) (*notificationsinternalapi.EchoResponse, error) {
 	id, err := h.svc.Echo(ctx, req.Body)
 	if err != nil {
 		h.logger.ErrorContext(ctx, "echo failed", logging.Error(err))

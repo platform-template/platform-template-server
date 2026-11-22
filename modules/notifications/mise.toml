@@ -63,7 +63,7 @@ run = '''
 set -eu
 
 packages=$(go list ./...)
-printf '%s\n' "$packages" | awk '!/\/internal\/integration-tests($|\/)/' | xargs go test
+printf '%s\n' "$packages" | awk '!/\/internal\/(integration-tests|persistence-tests)($|\/)/' | xargs go test
 '''
 
 [tasks."lint"]
@@ -74,4 +74,5 @@ depends = ["build"]
 run = [
     "docker build --tag distributed-programming-notifications:integration .",
     "go test -v -count=1 ./internal/integration-tests",
+    "go test -v -count=1 ./internal/persistence-tests",
 ]

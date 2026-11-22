@@ -19,7 +19,10 @@ import (
 )
 
 func TestGatewayInterceptor(t *testing.T) {
-	connection, err := grpc.NewClient(testEnv.conf.GRPC.Address, grpc.WithTransportCredentials(insecure.NewCredentials()))
+	connection, err := grpc.NewClient(
+		testEnv.conf.GRPC.Address,
+		grpc.WithTransportCredentials(insecure.NewCredentials()),
+	)
 	require.NoError(t, err)
 	defer connection.Close()
 
@@ -36,7 +39,11 @@ func TestGatewayInterceptor(t *testing.T) {
 	require.NoError(t, err)
 	require.NotNil(t, decision.GetContinueResponse())
 	require.Equal(t, "X-Demo-Request-ID", decision.GetContinueResponse().GetHeaderMutation().GetSet()[0].GetKey())
-	require.Equal(t, []string{"demo-request"}, decision.GetContinueResponse().GetHeaderMutation().GetSet()[0].GetValues())
+	require.Equal(
+		t,
+		[]string{"demo-request"},
+		decision.GetContinueResponse().GetHeaderMutation().GetSet()[0].GetValues(),
+	)
 
 	// Run the same generated route and interceptor configuration as local-up.
 	configuration := "kind: gateway/v1\nport: 8000\nhealthzPort: 15000\ngatewayHealthHost: 0\n"

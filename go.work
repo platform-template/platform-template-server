@@ -5,6 +5,7 @@ use (
 	./modules/auth
 	./modules/authz
 	./modules/identity
+	./modules/notifications
 	./modules/session
 	lib
 )

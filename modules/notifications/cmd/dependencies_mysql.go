@@ -4,18 +4,19 @@ import (
 	"context"
 	"errors"
 	"log/slog"
+	"time"
+
+	"notifications/internal/notifications/config"
+	notificationsmysql "notifications/internal/notifications/infra/mysql"
 
 	"github.com/distributed-programming-2026/go-sdk/pkg/mysql"
 	"github.com/distributed-programming-2026/go-sdk/pkg/uow"
 	mysqldriver "github.com/go-sql-driver/mysql"
-
-	"notifications/internal/notifications/config"
-	echomysql "notifications/internal/notifications/infra/mysql"
 )
 
 type database struct {
 	connector mysql.Connector
-	unit      uow.UnitOfWorkWithRepositoryProvider[*echomysql.RepositoryProvider]
+	unit      uow.UnitOfWorkWithRepositoryProvider[*notificationsmysql.RepositoryProvider]
 }
 
 func openDatabase(ctx context.Context, logger *slog.Logger, conf config.Env) (_ *database, err error) {
@@ -26,20 +27,20 @@ func openDatabase(ctx context.Context, logger *slog.Logger, conf config.Env) (_ 
 	dsn.User = conf.MySQL.User
 	dsn.Passwd = conf.MySQL.Password
 	dsn.ParseTime = true
+	dsn.Loc = time.UTC
 	dsn.Timeout = conf.MySQL.ConnectTimeout
 	dsn.ReadTimeout = conf.MySQL.ReadTimeout
 	dsn.WriteTimeout = conf.MySQL.WriteTimeout
-	dsn.Params = map[string]string{
-		"charset": "utf8mb4",
-	}
-
+	dsn.Params = map[string]string{"charset": "utf8mb4"}
 	connector := mysql.NewConnector()
-	err = connector.Open(dsn.FormatDSN(), mysql.Config{
-		MaxConnections:        conf.MySQL.MaxConnections,
-		ConnectionMaxLifeTime: conf.MySQL.ConnectionMaxLifeTime,
-		ConnectionMaxIdleTime: conf.MySQL.ConnectionMaxIdleTime,
-	})
-	if err != nil {
+	if err = connector.Open(
+		dsn.FormatDSN(),
+		mysql.Config{
+			MaxConnections:        conf.MySQL.MaxConnections,
+			ConnectionMaxLifeTime: conf.MySQL.ConnectionMaxLifeTime,
+			ConnectionMaxIdleTime: conf.MySQL.ConnectionMaxIdleTime,
+		},
+	); err != nil {
 		return nil, err
 	}
 	defer func() {
@@ -47,16 +48,10 @@ func openDatabase(ctx context.Context, logger *slog.Logger, conf config.Env) (_ 
 			err = errors.Join(err, connector.Close())
 		}
 	}()
-
 	client := connector.TransactionalClient()
-	err = migrateDatabase(ctx, logger, client)
-	if err != nil {
+	if err = migrateDatabase(ctx, logger, client); err != nil {
 		return nil, err
 	}
-
-	unit := uow.NewUnitOfWork(mysql.NewConnectionPool(client), echomysql.NewRepositoryProvider)
-	return &database{
-		connector: connector,
-		unit:      unit,
-	}, nil
+	unit := uow.NewUnitOfWork(mysql.NewConnectionPool(client), notificationsmysql.NewRepositoryProvider)
+	return &database{connector: connector, unit: unit}, nil
 }

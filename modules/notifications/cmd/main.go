@@ -70,6 +70,20 @@ func (a *application) command() *cli.Command {
 		Commands: []*cli.Command{
 			a.serviceCmd(),
 			a.messageHandlerCmd(),
+			a.migrateCmd(),
+		},
+	}
+}
+
+func (a *application) migrateCmd() *cli.Command {
+	return &cli.Command{
+		Name: "migrate",
+		Action: func(ctx context.Context, _ *cli.Command) error {
+			db, err := openDatabase(ctx, a.logger, a.conf)
+			if err != nil {
+				return err
+			}
+			return db.connector.Close()
 		},
 	}
 }
