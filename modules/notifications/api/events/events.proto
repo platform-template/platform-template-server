@@ -1,0 +1,9 @@
+syntax = "proto3";
+package notificationsEvents;
+
+option go_package = "/.;notificationsevents";
+
+message Echo {
+  string ID = 1;
+  string Body = 2;
+}

@@ -1,0 +1,14 @@
+kind: gateway/service/v1
+name: notifications
+weight: 100
+routes:
+  - pattern: '^/notifications/api/.*$'
+    rewrite:
+      old: '^/notifications/(.*)$'
+      new: '/$1'
+    target: notifications-service:8082
+    interceptors:
+      - id: notifications-interceptor
+        processingMode:
+          requestHeaders: true
+          responseHeaders: true
