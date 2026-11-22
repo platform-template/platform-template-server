@@ -2,6 +2,13 @@ kind: gateway/service/v1
 name: notifications
 weight: 100
 routes:
+  - pattern: '^/notifications/api/public/v1/notifications(?:/.*)?$'
+    allowedMethods: [GET, PATCH]
+    rewrite:
+      old: '^/notifications/(.*)$'
+      new: '/$1'
+    target: notifications-service:8082
+    disableHostRewrite: true
   - pattern: '^/notifications/api/.*$'
     rewrite:
       old: '^/notifications/(.*)$'

@@ -28,11 +28,13 @@ const moduleID = "notifications"
 var testEnv *environment
 
 type environment struct {
-	conf      config.Env
-	connector mysql.Connector
-	network   *testcontainers.DockerNetwork
-	logs      logBuffer
-	closers   []func() error
+	conf             config.Env
+	connector        mysql.Connector
+	network          *testcontainers.DockerNetwork
+	logs             logBuffer
+	closers          []func() error
+	sessionAddress   string
+	sessionContainer testcontainers.Container
 }
 
 func TestMain(m *testing.M) {
@@ -130,6 +132,11 @@ func (e *environment) prepare(ctx context.Context) error {
 	e.conf.Relay.Interval = 50 * time.Millisecond
 	e.conf.Relay.PublishTimeout = time.Second
 
+	err = e.startSession(ctx)
+	if err != nil {
+		return err
+	}
+
 	_, err = e.startApplication(ctx, "message-handler")
 	if err != nil {
 		return err
@@ -143,6 +150,33 @@ func (e *environment) prepare(ctx context.Context) error {
 		return err
 	}
 	e.conf.GRPC.Address, err = containerAddress(ctx, service, "8081/tcp")
+	return err
+}
+
+func (e *environment) startSession(ctx context.Context) error {
+	container, err := e.startContainer(ctx, testcontainers.ContainerRequest{
+		Image:          "distributed-programming-session:notifications-integration",
+		Cmd:            []string{"service"},
+		ExposedPorts:   []string{"8081/tcp", "8082/tcp"},
+		Networks:       []string{e.network.Name},
+		NetworkAliases: map[string][]string{e.network.Name: {"session-service"}},
+		Env: map[string]string{
+			"SESSION_MYSQL_ADDRESS":  "mysql:3306",
+			"SESSION_MYSQL_DATABASE": e.conf.MySQL.Database,
+			"SESSION_MYSQL_USER":     e.conf.MySQL.User,
+			"SESSION_MYSQL_PASSWORD": e.conf.MySQL.Password,
+			"SESSION_AMQP_URL":       "amqp://integration:integration-password@rabbitmq:5672/",
+		},
+		LogConsumerCfg: &testcontainers.LogConsumerConfig{Consumers: []testcontainers.LogConsumer{&e.logs}},
+		WaitingFor: wait.ForHTTP("/healthz").WithPort("8082/tcp").WithStatusCodeMatcher(func(code int) bool {
+			return code == http.StatusNoContent
+		}).WithStartupTimeout(time.Minute),
+	})
+	if err != nil {
+		return err
+	}
+	e.sessionContainer = container
+	e.sessionAddress, err = containerAddress(ctx, container, "8081/tcp")
 	return err
 }
 
@@ -189,6 +223,7 @@ func (e *environment) startApplication(ctx context.Context, command string) (tes
 		Networks: []string{e.network.Name},
 		Env: map[string]string{
 			prefix + "MYSQL_ADDRESS":         "mysql:3306",
+			prefix + "SESSION_ADDRESS":       "session-service:8081",
 			prefix + "MYSQL_DATABASE":        e.conf.MySQL.Database,
 			prefix + "MYSQL_USER":            e.conf.MySQL.User,
 			prefix + "MYSQL_PASSWORD":        e.conf.MySQL.Password,

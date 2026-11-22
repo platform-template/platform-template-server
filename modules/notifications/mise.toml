@@ -19,7 +19,7 @@ run = [
 run = "go generate ./..."
 
 [tasks.grpc-generate]
-depends = ["//lib:generate"]
+depends = ["//lib:generate", "//modules/session:generate"]
 run = """
 #!/usr/bin/env sh
 set -eu
@@ -72,7 +72,9 @@ run = "golangci-lint run"
 [tasks.integration-tests]
 depends = ["build"]
 run = [
+    "mise run //modules/session:build",
     "docker build --tag distributed-programming-notifications:integration .",
+    "docker build --tag distributed-programming-session:notifications-integration ../session",
     "go test -v -count=1 ./internal/integration-tests",
     "go test -v -count=1 ./internal/persistence-tests",
 ]

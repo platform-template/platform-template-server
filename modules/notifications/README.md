@@ -179,7 +179,7 @@ mise run //modules/notifications:integration-tests
 обработку через inbox, повторную доставку и некорректные HTTP-запросы.
 Задача mise собирает Linux-бинарник и Docker-образ. Testcontainers запускает
 сервис и consumer из этого образа вместе с MySQL и RabbitMQ в отдельной сети.
-Тестовый MySQL-пароль содержит специальные символы для проверки DSN.
+Тестовый MySQL-пароль содержит специальные символы для проверки DSN. Для проверки пользовательского API интеграционные тесты также собирают и запускают Session.
 
 ## Notifications: домен и хранилище
 
@@ -190,3 +190,11 @@ mise run //modules/notifications:integration-tests
 UUID уведомления и пользователя хранятся в `BINARY(16)`.
 
 Тесты хранилища запускаются отдельно в `internal/persistence-tests` и входят в задачу integration-tests.
+
+## Пользовательские уведомления
+
+Через Gateway доступны `GET /notifications/api/public/v1/notifications`, `GET /notifications/api/public/v1/notifications/unread-count` и `PATCH /notifications/api/public/v1/notifications/{id}/read`. Для списка поддерживаются `limit` (по умолчанию 20, максимум 1000), `offset` и `unreadOnly`. Создание уведомлений пока доступно только внутри application-слоя.
+
+Сервис проверяет cookie `session` через gRPC Session при каждом запросе, включая прямые запросы к HTTP-порту. Клиентские заголовки идентичности не используются. При недоступности Session запрос отклоняется с 503. Для защиты изменяющих запросов `Origin`, если он указан, должен совпадать с Host.
+
+Адрес Session задаётся переменной `NOTIFICATIONS_SESSION_ADDRESS` (по умолчанию `localhost:8081`; в Compose — `session-service:8081`). Как и в Authz, соединение с Session использует внутреннюю доверенную сеть без TLS; эту границу необходимо защитить средствами развёртывания.

@@ -6,12 +6,17 @@ import (
 )
 
 type Env struct {
-	App   App   `envconfig:"app"`
-	GRPC  GRPC  `envconfig:"grpc"`
-	HTTP  HTTP  `envconfig:"http"`
-	MySQL MySQL `envconfig:"mysql"`
-	AMQP  AMQP  `envconfig:"amqp"`
-	Relay Relay `envconfig:"relay"`
+	App     App     `envconfig:"app"`
+	GRPC    GRPC    `envconfig:"grpc"`
+	HTTP    HTTP    `envconfig:"http"`
+	MySQL   MySQL   `envconfig:"mysql"`
+	AMQP    AMQP    `envconfig:"amqp"`
+	Relay   Relay   `envconfig:"relay"`
+	Session Session `envconfig:"session"`
+}
+
+type Session struct {
+	Address string `envconfig:"address" default:"localhost:8081"`
 }
 
 type App struct {
@@ -68,6 +73,7 @@ func (c Env) Validate() error {
 		return errors.New("connection, prefetch and batch counts must be positive")
 	}
 	if c.MySQL.Address == "" || c.MySQL.Database == "" || c.MySQL.User == "" || c.AMQP.URL == "" ||
+		c.Session.Address == "" ||
 		c.AMQP.Queue == "" ||
 		c.HTTP.Address == "" ||
 		c.GRPC.Address == "" {

@@ -7,6 +7,7 @@ import (
 	"strings"
 	"testing"
 	"time"
+	"uuid"
 
 	api "github.com/distributed-programming-2026/lib/gateway/interceptor"
 	"github.com/stretchr/testify/require"
@@ -75,6 +76,30 @@ func TestGatewayInterceptor(t *testing.T) {
 	require.Equal(t, moduleID, response.HTTPResponse.Header.Get("X-Demo-Interceptor"))
 	require.NotNil(t, response.JSON200)
 	waitHandled(t, checkEcho(t, response.JSON200.OperationID, "through gateway"), 1)
+
+	unauthorized, err := client.ListNotificationsWithResponse(ctx, nil,
+		func(_ context.Context, request *http.Request) error {
+			request.Header.Set("X-Demo-Deny", "true")
+			request.Header.Set("X-User-ID", "550e8400-e29b-41d4-a716-446655440000")
+			return nil
+		},
+	)
+	require.NoError(t, err)
+	require.Equal(t, http.StatusUnauthorized, unauthorized.StatusCode())
+	require.Empty(t, unauthorized.HTTPResponse.Header.Get("X-Demo-Interceptor"))
+
+	_, token := newSession(t, uuid.New())
+	authorized, err := client.ListNotificationsWithResponse(ctx, nil,
+		func(_ context.Context, request *http.Request) error {
+			request.Header.Set("Cookie", "session="+token)
+			request.Header.Set("X-Demo-Deny", "true")
+			return nil
+		},
+	)
+	require.NoError(t, err)
+	require.Equal(t, http.StatusOK, authorized.StatusCode())
+	require.NotNil(t, authorized.JSON200)
+	require.Empty(t, authorized.JSON200.Notifications)
 
 	denied, err := client.EchoWithResponse(ctx, publicapi.EchoJSONRequestBody{Body: "denied by gateway"},
 		func(_ context.Context, request *http.Request) error {

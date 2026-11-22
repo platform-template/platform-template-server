@@ -3,14 +3,18 @@ package main
 import (
 	"context"
 	"errors"
+	"fmt"
 	"log/slog"
 
 	"github.com/urfave/cli/v3"
 	"golang.org/x/sync/errgroup"
+	"google.golang.org/grpc"
+	"google.golang.org/grpc/credentials/insecure"
 
 	"notifications/internal/notifications/app"
 	"notifications/internal/notifications/config"
 	eventinfra "notifications/internal/notifications/infra/event"
+	sessiongrpc "notifications/internal/notifications/infra/grpc/session"
 )
 
 func (a *application) serviceCmd() *cli.Command {
@@ -48,7 +52,12 @@ func service(ctx context.Context, logger *slog.Logger, conf config.Env) (err err
 
 	dispatcherFactory := eventinfra.NewDispatcherFactory(appID, dispatcher)
 	svc := app.NewService(db.unit, dispatcherFactory)
-	httpServer, err := newHTTPServer(logger, conf, svc)
+	sessionConn, err := grpc.NewClient(conf.Session.Address, grpc.WithTransportCredentials(insecure.NewCredentials()))
+	if err != nil {
+		return fmt.Errorf("connect session: %w", err)
+	}
+	defer func() { err = errors.Join(err, sessionConn.Close()) }()
+	httpServer, err := newHTTPServer(logger, conf, svc, sessiongrpc.NewClient(sessionConn))
 	if err != nil {
 		return err
 	}

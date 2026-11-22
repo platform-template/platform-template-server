@@ -13,13 +13,19 @@ import (
 	internalapi "notifications/api/server/internalapi"
 	"notifications/internal/notifications/app"
 	"notifications/internal/notifications/config"
+	sessiongrpc "notifications/internal/notifications/infra/grpc/session"
 	gatewayhandler "notifications/internal/notifications/infra/handlers/gateway"
 	internalhandler "notifications/internal/notifications/infra/handlers/internalapi"
 	publichandler "notifications/internal/notifications/infra/handlers/public"
 )
 
-func newHTTPServer(logger *slog.Logger, conf config.Env, svc *app.Service) (*http.Server, error) {
-	register, err := publichandler.Register(svc, logger)
+func newHTTPServer(
+	logger *slog.Logger,
+	conf config.Env,
+	svc *app.Service,
+	sessions *sessiongrpc.Client,
+) (*http.Server, error) {
+	register, err := publichandler.Register(svc, logger, sessions)
 	if err != nil {
 		return nil, err
 	}

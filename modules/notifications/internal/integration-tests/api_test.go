@@ -84,3 +84,26 @@ func TestInvalidHTTPRequests(t *testing.T) {
 		require.Equal(t, http.StatusBadRequest, response.StatusCode)
 	}
 }
+
+func TestNotificationsBackendRequiresSession(t *testing.T) {
+	client, err := publicapi.NewClientWithResponses("http://" + testEnv.conf.HTTP.Address)
+	require.NoError(t, err)
+
+	response, err := client.ListNotificationsWithResponse(t.Context(), nil,
+		func(_ context.Context, request *http.Request) error {
+			request.Header.Set("X-User-ID", "550e8400-e29b-41d4-a716-446655440000")
+			return nil
+		},
+	)
+	require.NoError(t, err)
+	require.Equal(t, http.StatusUnauthorized, response.StatusCode())
+
+	response, err = client.ListNotificationsWithResponse(t.Context(), nil,
+		func(_ context.Context, request *http.Request) error {
+			request.Header.Set("Cookie", "session=unverified")
+			return nil
+		},
+	)
+	require.NoError(t, err)
+	require.Equal(t, http.StatusUnauthorized, response.StatusCode())
+}
