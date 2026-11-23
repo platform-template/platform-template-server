@@ -1,0 +1,14 @@
+kind: gateway/service/v1
+name: inventory
+weight: 100
+routes:
+  - pattern: '^/inventory/api/.*$'
+    rewrite:
+      old: '^/inventory/(.*)$'
+      new: '/$1'
+    target: inventory-service:8082
+    interceptors:
+      - id: inventory-interceptor
+        processingMode:
+          requestHeaders: true
+          responseHeaders: true

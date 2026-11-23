@@ -1,0 +1,6 @@
+kind: gateway/service/v1
+name: inventory-interceptor
+interceptor:
+  address: inventory-service:8081
+  transport: grpc
+  timeout: 5s

@@ -1,0 +1,9 @@
+syntax = "proto3";
+package inventoryEvents;
+
+option go_package = "/.;inventoryevents";
+
+message Echo {
+  string ID = 1;
+  string Body = 2;
+}
