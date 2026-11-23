@@ -48,6 +48,9 @@ func Register(
 							Request:    r,
 							PathParams: params,
 							Route:      route,
+							Options: &openapi3filter.Options{
+								AuthenticationFunc: openapi3filter.NoopAuthenticationFunc,
+							},
 						})
 					}
 					if err != nil {

@@ -85,19 +85,25 @@ func (h handler) GetAuditEntry(
 func auditEntryResponse(entry *domain.AuditEntry) publicapi.AuditEntry {
 	data := entry.Data()
 	response := publicapi.AuditEntry{
-		EventId:       data.EventID,
-		ModuleKey:     data.ModuleKey,
-		Action:        data.Action,
-		TargetType:    &data.TargetType,
-		TargetId:      &data.TargetID,
-		CorrelationId: &data.CorrelationID,
-		Metadata:      data.Metadata,
-		OccurredAt:    data.OccurredAt,
-		RecordedAt:    data.RecordedAt,
+		EventId:    data.EventID,
+		ModuleKey:  data.ModuleKey,
+		Action:     data.Action,
+		Metadata:   data.Metadata,
+		OccurredAt: data.OccurredAt,
+		RecordedAt: data.RecordedAt,
 	}
 	if data.ActorID != nil {
 		actor := openapitypes.UUID(*data.ActorID)
 		response.ActorId = &actor
+	}
+	if data.TargetType != "" {
+		response.TargetType = &data.TargetType
+	}
+	if data.TargetID != "" {
+		response.TargetId = &data.TargetID
+	}
+	if data.CorrelationID != "" {
+		response.CorrelationId = &data.CorrelationID
 	}
 	return response
 }

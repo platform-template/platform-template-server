@@ -57,12 +57,15 @@ func TestAuditHTTP(t *testing.T) {
 	svc := app.NewService(unit, nil)
 	actor := uuid.New()
 	input := app.RecordAuditEntryInput{
-		EventID:    "http/" + uuid.New().String(),
-		ActorID:    &actor,
-		ModuleKey:  "http_test",
-		Action:     "http.login",
-		Metadata:   []byte(`{"ok":true}`),
-		OccurredAt: time.Now(),
+		EventID:       "http/" + uuid.New().String(),
+		ActorID:       &actor,
+		ModuleKey:     "http_test",
+		Action:        "http.login",
+		TargetType:    "account",
+		TargetID:      "account:123",
+		CorrelationID: "request:123",
+		Metadata:      []byte(`{"ok":true}`),
+		OccurredAt:    time.Now(),
 	}
 	_, err := svc.RecordAuditEntry(t.Context(), input)
 	require.NoError(t, err)
@@ -89,7 +92,7 @@ func TestAuditHTTP(t *testing.T) {
 		return response.StatusCode, body
 	}
 	base := "/api/public/v1/audit/entries"
-	for _, test := range []struct {
+	accessCases := []struct {
 		token  string
 		status int
 	}{
@@ -97,9 +100,12 @@ func TestAuditHTTP(t *testing.T) {
 		{"revoked", 401},
 		{"ordinary", 403},
 		{"offline", 503},
-	} {
-		statusCode, _ := request(base, test.token)
-		require.Equal(t, test.status, statusCode)
+	}
+	for _, path := range []string{base, base + "/by-event-id?eventId=missing"} {
+		for _, test := range accessCases {
+			statusCode, _ := request(path, test.token)
+			require.Equal(t, test.status, statusCode)
+		}
 	}
 	for _, query := range []string{"?actorId=bad", "?from=bad", "?limit=101", "?offset=-1"} {
 		statusCode, _ := request(base+query, "admin")
@@ -117,8 +123,47 @@ func TestAuditHTTP(t *testing.T) {
 	require.Len(t, result.Entries, 1)
 	require.Equal(t, input.EventID, result.Entries[0].EventID)
 	require.Equal(t, true, result.Entries[0].Metadata["ok"])
-	statusCode, _ = request(base+"/by-event-id?eventId="+url.QueryEscape(input.EventID), "admin")
+	statusCode, body = request(base+"/by-event-id?eventId="+url.QueryEscape(input.EventID), "admin")
 	require.Equal(t, http.StatusOK, statusCode)
+	var entry map[string]any
+	require.NoError(t, json.Unmarshal(body, &entry))
+	require.Equal(t, actor.String(), entry["actorId"])
+	require.Equal(t, input.TargetType, entry["targetType"])
+	require.Equal(t, input.TargetID, entry["targetId"])
+	require.Equal(t, input.CorrelationID, entry["correlationId"])
+
+	emptyInput := app.RecordAuditEntryInput{
+		EventID:    "http/" + uuid.New().String(),
+		ModuleKey:  "http_test",
+		Action:     "http.login",
+		OccurredAt: time.Now(),
+	}
+	_, err = svc.RecordAuditEntry(t.Context(), emptyInput)
+	require.NoError(t, err)
+	statusCode, body = request(base+"/by-event-id?eventId="+url.QueryEscape(emptyInput.EventID), "admin")
+	require.Equal(t, http.StatusOK, statusCode)
+	entry = nil
+	require.NoError(t, json.Unmarshal(body, &entry))
+	for _, field := range []string{"actorId", "targetType", "targetId", "correlationId"} {
+		require.NotContains(t, entry, field)
+	}
+	statusCode, body = request(base+"?moduleKey=http_test", "admin")
+	require.Equal(t, http.StatusOK, statusCode)
+	var list struct {
+		Entries []map[string]any `json:"entries"`
+	}
+	require.NoError(t, json.Unmarshal(body, &list))
+	foundEmpty := false
+	for _, item := range list.Entries {
+		if item["eventId"] != emptyInput.EventID {
+			continue
+		}
+		foundEmpty = true
+		for _, field := range []string{"actorId", "targetType", "targetId", "correlationId"} {
+			require.NotContains(t, item, field)
+		}
+	}
+	require.True(t, foundEmpty)
 	statusCode, _ = request(base+"/by-event-id?eventId=missing", "admin")
 	require.Equal(t, http.StatusNotFound, statusCode)
 	_, body = request(base+"?actorId="+uuid.New().String(), "admin")

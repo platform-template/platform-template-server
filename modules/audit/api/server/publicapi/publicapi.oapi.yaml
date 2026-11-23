@@ -7,6 +7,9 @@ paths:
   /api/public/v1/audit/entries:
     get:
       operationId: listAuditEntries
+      description: Reading audit entries requires a session belonging to a Superuser with global privileges.
+      security:
+        - sessionCookie: []
       parameters:
         - name: actorId
           in: query
@@ -73,6 +76,9 @@ paths:
   /api/public/v1/audit/entries/by-event-id:
     get:
       operationId: getAuditEntry
+      description: Reading audit entries requires a session belonging to a Superuser with global privileges.
+      security:
+        - sessionCookie: []
       parameters:
         - name: eventId
           in: query
@@ -109,6 +115,11 @@ paths:
               schema:
                 $ref: "#/components/schemas/echoResponseData"
 components:
+  securitySchemes:
+    sessionCookie:
+      type: apiKey
+      in: cookie
+      name: session
   schemas:
     auditEntry:
       type: object
