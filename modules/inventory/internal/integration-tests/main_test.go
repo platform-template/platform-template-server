@@ -64,6 +64,11 @@ func runTests(m *testing.M) (exitCode int) {
 }
 
 func (e *environment) prepare(ctx context.Context) error {
+	if _, ok := os.LookupEnv("INTEGRATION_DEFAULTS_APP_DEBUG"); !ok {
+		if err := os.Setenv("INTEGRATION_DEFAULTS_APP_DEBUG", "false"); err != nil {
+			return err
+		}
+	}
 	err := envconfig.Process("integration_defaults", &e.conf)
 	if err != nil {
 		return err
@@ -204,7 +209,10 @@ func (e *environment) startApplication(ctx context.Context, command string) (tes
 	})
 }
 
-func (e *environment) startContainer(ctx context.Context, request testcontainers.ContainerRequest) (testcontainers.Container, error) {
+func (e *environment) startContainer(
+	ctx context.Context,
+	request testcontainers.ContainerRequest,
+) (testcontainers.Container, error) {
 	container, err := testcontainers.GenericContainer(ctx, testcontainers.GenericContainerRequest{
 		ContainerRequest: request,
 		Started:          true,

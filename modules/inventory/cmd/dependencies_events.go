@@ -16,7 +16,12 @@ import (
 	eventhandler "inventory/internal/inventory/infra/handlers/events"
 )
 
-func newDispatcher(logger *slog.Logger, conf config.Env, db *database, connection amqp.Connection) (event.Dispatcher, *outbox.Relay, error) {
+func newDispatcher(
+	logger *slog.Logger,
+	conf config.Env,
+	db *database,
+	connection amqp.Connection,
+) (event.Dispatcher, *outbox.Relay, error) {
 	// Declare the durable queue before publishing, even if the consumer is offline.
 	producer := connection.Producer(domainevent.DomainExchange(), eventQueue(conf), eventBinding(conf))
 	transport, err := eventamqp.NewDispatcher(producer)

@@ -34,7 +34,10 @@ func TestHTTPAndGRPCDelivery(t *testing.T) {
 	envelope := checkEcho(t, response.JSON200.OperationID, "HTTP привет")
 	waitHandled(t, envelope, 1)
 
-	connection, err := grpc.NewClient(testEnv.conf.GRPC.Address, grpc.WithTransportCredentials(insecure.NewCredentials()))
+	connection, err := grpc.NewClient(
+		testEnv.conf.GRPC.Address,
+		grpc.WithTransportCredentials(insecure.NewCredentials()),
+	)
 	require.NoError(t, err)
 	defer connection.Close()
 

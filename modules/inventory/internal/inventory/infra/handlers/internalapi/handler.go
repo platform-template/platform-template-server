@@ -25,7 +25,10 @@ type handler struct {
 	inventoryinternalapi.UnimplementedInventoryServiceServer
 }
 
-func (h handler) Echo(ctx context.Context, req *inventoryinternalapi.EchoRequest) (*inventoryinternalapi.EchoResponse, error) {
+func (h handler) Echo(
+	ctx context.Context,
+	req *inventoryinternalapi.EchoRequest,
+) (*inventoryinternalapi.EchoResponse, error) {
 	id, err := h.svc.Echo(ctx, req.Body)
 	if err != nil {
 		h.logger.ErrorContext(ctx, "echo failed", logging.Error(err))
