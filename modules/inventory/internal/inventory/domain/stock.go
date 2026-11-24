@@ -59,6 +59,15 @@ func (stock Stock) Release(quantity int64) (Stock, error) {
 	return stock, nil
 }
 
+func (stock Stock) Consume(quantity int64) (Stock, error) {
+	if quantity <= 0 || quantity > stock.ReservedQuantity {
+		return Stock{}, ErrInvalidStock
+	}
+	stock.Quantity -= quantity
+	stock.ReservedQuantity -= quantity
+	return stock, nil
+}
+
 type StockRepository interface {
 	GetByProductID(uuid.UUID) (*Stock, error)
 	GetByProductIDs([]uuid.UUID) ([]Stock, error)

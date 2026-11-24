@@ -112,20 +112,7 @@ func (r *reservationRepository) Reserve(reservation *domain.Reservation) error {
 		return err
 	}
 	if !created {
-		existing, err := r.get(id, true)
-		if err != nil {
-			return err
-		}
-		if existing == nil {
-			return errors.New("reservation disappeared")
-		}
-		if len(existing.Items()) != 0 && !existing.Matches(reservation) {
-			return domain.ErrReservationConflict
-		}
-		if existing.Status() == domain.ReservationCancelled {
-			return domain.ErrReservationCancelled
-		}
-		return nil
+		return r.checkExisting(reservation)
 	}
 	for _, item := range reservation.Items() {
 		stock, err := getStock(r.ctx, r.client, item.ProductID, true)
@@ -164,6 +151,26 @@ func (r *reservationRepository) Reserve(reservation *domain.Reservation) error {
 	return nil
 }
 
+func (r *reservationRepository) checkExisting(requested *domain.Reservation) error {
+	existing, err := r.get(requested.ID(), true)
+	if err != nil {
+		return err
+	}
+	if existing == nil {
+		return errors.New("reservation disappeared")
+	}
+	if existing.Status() == domain.ReservationCancelled {
+		return domain.ErrReservationCancelled
+	}
+	if existing.Status() == domain.ReservationConsumed {
+		return domain.ErrReservationConsumed
+	}
+	if !existing.Matches(requested) {
+		return domain.ErrReservationConflict
+	}
+	return nil
+}
+
 func (r *reservationRepository) Release(id uuid.UUID) error {
 	if id == uuid.Nil() {
 		return domain.ErrInvalidReservation
@@ -182,7 +189,11 @@ func (r *reservationRepository) Release(id uuid.UUID) error {
 	if reservation == nil {
 		return errors.New("reservation disappeared")
 	}
-	if !reservation.Cancel() {
+	changed, err := reservation.Cancel()
+	if err != nil {
+		return err
+	}
+	if !changed {
 		return nil
 	}
 	for _, item := range reservation.Items() {
@@ -217,6 +228,51 @@ func (r *reservationRepository) Release(id uuid.UUID) error {
 	)
 	if err != nil {
 		return fmt.Errorf("cancel reservation: %w", err)
+	}
+	return nil
+}
+
+func (r *reservationRepository) Consume(id uuid.UUID) error {
+	if id == uuid.Nil() {
+		return domain.ErrInvalidReservation
+	}
+	reservation, err := r.get(id, true)
+	if err != nil {
+		return err
+	}
+	if reservation == nil {
+		return domain.ErrReservationNotFound
+	}
+	changed, err := reservation.Consume()
+	if err != nil {
+		return err
+	}
+	if !changed {
+		return nil
+	}
+	for _, item := range reservation.Items() {
+		stock, err := getStock(r.ctx, r.client, item.ProductID, true)
+		if err != nil {
+			return err
+		}
+		if stock == nil {
+			return domain.ErrProductNotFound
+		}
+		updated, err := stock.Consume(item.Quantity)
+		if err != nil {
+			return err
+		}
+		_, err = r.client.ExecContext(r.ctx, "stock.consume",
+			`UPDATE stocks SET quantity = ?, reserved_quantity = ? WHERE product_id = ?`,
+			updated.Quantity, updated.ReservedQuantity, item.ProductID[:])
+		if err != nil {
+			return fmt.Errorf("consume stock: %w", err)
+		}
+	}
+	_, err = r.client.ExecContext(r.ctx, "reservation.consume",
+		`UPDATE reservations SET status = ? WHERE id = ?`, string(domain.ReservationConsumed), id[:])
+	if err != nil {
+		return fmt.Errorf("consume reservation: %w", err)
 	}
 	return nil
 }

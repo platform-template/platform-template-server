@@ -6,12 +6,18 @@ import (
 )
 
 type Env struct {
-	App   App   `envconfig:"app"`
-	GRPC  GRPC  `envconfig:"grpc"`
-	HTTP  HTTP  `envconfig:"http"`
-	MySQL MySQL `envconfig:"mysql"`
-	AMQP  AMQP  `envconfig:"amqp"`
-	Relay Relay `envconfig:"relay"`
+	App     App           `envconfig:"app"`
+	GRPC    GRPC          `envconfig:"grpc"`
+	HTTP    HTTP          `envconfig:"http"`
+	MySQL   MySQL         `envconfig:"mysql"`
+	AMQP    AMQP          `envconfig:"amqp"`
+	Relay   Relay         `envconfig:"relay"`
+	Session RemoteService `envconfig:"session"`
+	Authz   RemoteService `envconfig:"authz"`
+}
+
+type RemoteService struct {
+	Address string `envconfig:"address"`
 }
 
 type App struct {

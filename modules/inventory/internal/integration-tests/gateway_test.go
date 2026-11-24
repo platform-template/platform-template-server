@@ -76,6 +76,10 @@ func TestGatewayInterceptor(t *testing.T) {
 	require.NotNil(t, response.JSON200)
 	waitHandled(t, checkEcho(t, response.JSON200.OperationID, "through gateway"), 1)
 
+	products, err := client.ListProductsWithResponse(ctx, &publicapi.ListProductsParams{})
+	require.NoError(t, err)
+	require.Equal(t, http.StatusUnauthorized, products.StatusCode())
+
 	denied, err := client.EchoWithResponse(ctx, publicapi.EchoJSONRequestBody{Body: "denied by gateway"},
 		func(_ context.Context, request *http.Request) error {
 			request.Header.Set("X-Demo-Deny", "true")

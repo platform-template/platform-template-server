@@ -25,6 +25,8 @@ import (
 )
 
 var client mysql.TransactionalClient
+var upgradedProductID uuid.UUID
+var upgradedReservationID uuid.UUID
 
 func TestMain(m *testing.M) {
 	os.Exit(runTests(m))
@@ -70,11 +72,51 @@ func runTests(m *testing.M) (exitCode int) {
 		fmt.Fprintln(os.Stderr, err)
 		return 1
 	}
-	if err := runner.Migrate(ctx, "inventory", migrations.Database(client)...); err != nil {
+	allMigrations := migrations.Database(client)
+	if err := runner.Migrate(ctx, "inventory", allMigrations[:len(allMigrations)-1]...); err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		return 1
+	}
+	svc := newService()
+	product, err := svc.CreateProduct(ctx, "migration fixture", domain.UnitGrams)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		return 1
+	}
+	upgradedProductID = product.ID
+	upgradedReservationID = uuid.New()
+	if err := svc.AddStock(ctx, product.ID, 10); err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		return 1
+	}
+	items := []domain.ReservationItem{
+		{
+			ProductID: product.ID,
+			Quantity:  4,
+		},
+	}
+	if err := svc.Reserve(ctx, upgradedReservationID, items); err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		return 1
+	}
+	if err := runner.Migrate(ctx, "inventory", allMigrations...); err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		return 1
 	}
 	return m.Run()
+}
+
+func TestMigrationPreservesReservation(t *testing.T) {
+	svc := newService()
+	stock, err := svc.GetStock(t.Context(), upgradedProductID)
+	require.NoError(t, err)
+	require.EqualValues(t, 10, stock.Quantity)
+	require.EqualValues(t, 4, stock.ReservedQuantity)
+	require.NoError(t, svc.Consume(t.Context(), upgradedReservationID))
+	stock, err = svc.GetStock(t.Context(), upgradedProductID)
+	require.NoError(t, err)
+	require.EqualValues(t, 6, stock.Quantity)
+	require.Zero(t, stock.ReservedQuantity)
 }
 
 func newService() *app.Service {
@@ -84,12 +126,10 @@ func newService() *app.Service {
 
 func addProduct(t *testing.T, svc *app.Service, quantity int64) uuid.UUID {
 	t.Helper()
-	id := uuid.New()
-	product, err := domain.NewProduct(id, "product", domain.UnitGrams)
+	product, err := svc.CreateProduct(t.Context(), "product", domain.UnitGrams)
 	require.NoError(t, err)
-	require.NoError(t, svc.CreateProduct(t.Context(), product))
-	require.NoError(t, svc.AddStock(t.Context(), id, quantity))
-	return id
+	require.NoError(t, svc.AddStock(t.Context(), product.ID, quantity))
+	return product.ID
 }
 
 func TestReservationLifecycle(t *testing.T) {
@@ -100,7 +140,7 @@ func TestReservationLifecycle(t *testing.T) {
 	product, err := products.GetByID(first)
 	require.NoError(t, err)
 	require.Equal(t, first, product.ID)
-	allProducts, err := products.List()
+	allProducts, err := products.List(domain.ProductFilter{Limit: 20})
 	require.NoError(t, err)
 	require.GreaterOrEqual(t, len(allProducts), 2)
 	stocks := repository.NewStockRepository(t.Context(), client)

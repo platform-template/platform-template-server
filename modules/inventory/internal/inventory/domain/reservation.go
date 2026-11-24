@@ -10,6 +10,8 @@ var (
 	ErrInvalidReservation   = errors.New("invalid reservation")
 	ErrReservationConflict  = errors.New("reservation conflict")
 	ErrReservationCancelled = errors.New("reservation cancelled")
+	ErrReservationConsumed  = errors.New("reservation consumed")
+	ErrReservationNotFound  = errors.New("reservation not found")
 )
 
 type ReservationItem struct {
@@ -22,6 +24,7 @@ type ReservationStatus string
 const (
 	ReservationActive    ReservationStatus = "active"
 	ReservationCancelled ReservationStatus = "cancelled"
+	ReservationConsumed  ReservationStatus = "consumed"
 )
 
 type Reservation struct {
@@ -40,8 +43,8 @@ func RestoreReservation(
 	items []ReservationItem,
 ) (*Reservation, error) {
 	if id == uuid.Nil() ||
-		(status != ReservationActive && status != ReservationCancelled) ||
-		(status == ReservationActive && len(items) == 0) {
+		(status != ReservationActive && status != ReservationCancelled && status != ReservationConsumed) ||
+		(status != ReservationCancelled && len(items) == 0) {
 		return nil, ErrInvalidReservation
 	}
 	copyItems := append([]ReservationItem(nil), items...)
@@ -72,12 +75,26 @@ func (reservation *Reservation) Items() []ReservationItem {
 	return append([]ReservationItem(nil), reservation.items...)
 }
 
-func (reservation *Reservation) Cancel() bool {
-	if reservation.status == ReservationCancelled {
-		return false
+func (reservation *Reservation) Cancel() (bool, error) {
+	switch reservation.status {
+	case ReservationCancelled:
+		return false, nil
+	case ReservationConsumed:
+		return false, ErrReservationConsumed
 	}
 	reservation.status = ReservationCancelled
-	return true
+	return true, nil
+}
+
+func (reservation *Reservation) Consume() (bool, error) {
+	switch reservation.status {
+	case ReservationConsumed:
+		return false, nil
+	case ReservationCancelled:
+		return false, ErrReservationCancelled
+	}
+	reservation.status = ReservationConsumed
+	return true, nil
 }
 
 func (reservation *Reservation) Matches(other *Reservation) bool {
@@ -96,4 +113,5 @@ type ReservationRepository interface {
 	GetByID(uuid.UUID) (*Reservation, error)
 	Reserve(*Reservation) error
 	Release(uuid.UUID) error
+	Consume(uuid.UUID) error
 }

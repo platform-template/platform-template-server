@@ -1,8 +1,20 @@
 package public
 
 import (
+	"context"
 	"log/slog"
 	"net/http"
+	"net/url"
+	"strings"
+	"time"
+	"uuid"
+
+	authzapi "authz/api/server/internalapi"
+	sessionapi "session/api/server/internalapi"
+
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/metadata"
+	"google.golang.org/grpc/status"
 
 	publicapi "inventory/api/server/publicapi"
 	"inventory/internal/inventory/app"
@@ -15,8 +27,9 @@ import (
 	runtimehttp "github.com/distributed-programming-2026/lib/runtime/http"
 )
 
-func Register(svc *app.Service, logger *slog.Logger) (runtimehttp.RegisterFunc, error) {
-	spec, err := publicapi.GetSwagger()
+func Register(svc *app.Service, logger *slog.Logger, sessions sessionapi.SessionServiceClient,
+	authz authzapi.AuthzServiceClient) (runtimehttp.RegisterFunc, error) {
+	spec, err := publicapi.GetSpec()
 	if err != nil {
 		return nil, err
 	}
@@ -26,6 +39,7 @@ func Register(svc *app.Service, logger *slog.Logger) (runtimehttp.RegisterFunc, 
 	}
 	return func(router chi.Router) error {
 		router.Group(func(router chi.Router) {
+			router.Use(authorizeInventory(sessions, authz))
 			router.Use(func(next http.Handler) http.Handler {
 				return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 					route, params, err := validatorRouter.FindRoute(r)
@@ -34,6 +48,9 @@ func Register(svc *app.Service, logger *slog.Logger) (runtimehttp.RegisterFunc, 
 							Request:    r,
 							PathParams: params,
 							Route:      route,
+							Options: &openapi3filter.Options{
+								AuthenticationFunc: openapi3filter.NoopAuthenticationFunc,
+							},
 						})
 					}
 					if err != nil {
@@ -53,4 +70,70 @@ func Register(svc *app.Service, logger *slog.Logger) (runtimehttp.RegisterFunc, 
 		})
 		return nil
 	}, nil
+}
+
+func authorizeInventory(
+	sessions sessionapi.SessionServiceClient,
+	authz authzapi.AuthzServiceClient,
+) func(http.Handler) http.Handler {
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			base := "/api/public/v1/products"
+			if r.URL.Path != base && !strings.HasPrefix(r.URL.Path, base+"/") {
+				next.ServeHTTP(w, r)
+				return
+			}
+			cookie, err := r.Cookie("session")
+			if err != nil || cookie.Value == "" {
+				http.Error(w, "unauthorized", http.StatusUnauthorized)
+				return
+			}
+			ctx, cancel := context.WithTimeout(r.Context(), 3*time.Second)
+			defer cancel()
+			resolved, err := sessions.ResolveSession(ctx, &sessionapi.ResolveSessionRequest{Token: cookie.Value})
+			if status.Code(err) == codes.Unauthenticated || status.Code(err) == codes.InvalidArgument {
+				http.Error(w, "unauthorized", http.StatusUnauthorized)
+				return
+			}
+			if err != nil || resolved == nil {
+				http.Error(w, "authentication unavailable", http.StatusServiceUnavailable)
+				return
+			}
+			userID, err := uuid.Parse(resolved.GetUserId())
+			if err != nil || userID == uuid.Nil() {
+				http.Error(w, "authentication unavailable", http.StatusServiceUnavailable)
+				return
+			}
+			if r.Method != http.MethodGet && !authorizeWrite(ctx, w, r, cookie.Value, authz) {
+				return
+			}
+			next.ServeHTTP(w, r)
+		})
+	}
+}
+
+func authorizeWrite(ctx context.Context, w http.ResponseWriter, r *http.Request,
+	token string, authz authzapi.AuthzServiceClient) bool {
+	if origin := r.Header.Get("Origin"); origin != "" {
+		parsed, err := url.Parse(origin)
+		if err != nil || parsed.Host != r.Host {
+			http.Error(w, "forbidden", http.StatusForbidden)
+			return false
+		}
+	}
+	ctx = metadata.NewOutgoingContext(ctx, metadata.Pairs("session", token))
+	response, err := authz.IsSuperuser(ctx, &authzapi.IsSuperuserRequest{})
+	if status.Code(err) == codes.Unauthenticated {
+		http.Error(w, "unauthorized", http.StatusUnauthorized)
+		return false
+	}
+	if err != nil || response == nil {
+		http.Error(w, "authorization unavailable", http.StatusServiceUnavailable)
+		return false
+	}
+	if !response.GetIsSuperuser() {
+		http.Error(w, "forbidden", http.StatusForbidden)
+		return false
+	}
+	return true
 }

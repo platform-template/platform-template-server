@@ -3,10 +3,16 @@ package main
 import (
 	"context"
 	"errors"
+	"fmt"
 	"log/slog"
+
+	authzapi "authz/api/server/internalapi"
+	sessionapi "session/api/server/internalapi"
 
 	"github.com/urfave/cli/v3"
 	"golang.org/x/sync/errgroup"
+	grpcclient "google.golang.org/grpc"
+	"google.golang.org/grpc/credentials/insecure"
 
 	"inventory/internal/inventory/app"
 	"inventory/internal/inventory/config"
@@ -48,7 +54,32 @@ func service(ctx context.Context, logger *slog.Logger, conf config.Env) (err err
 
 	dispatcherFactory := eventinfra.NewDispatcherFactory(appID, dispatcher)
 	svc := app.NewService(db.unit, dispatcherFactory)
-	httpServer, err := newHTTPServer(logger, conf, svc)
+	sessionAddress := conf.Session.Address
+	if sessionAddress == "" {
+		sessionAddress = "session-service:8081"
+	}
+	authzAddress := conf.Authz.Address
+	if authzAddress == "" {
+		authzAddress = "authz-service:8081"
+	}
+	sessionConn, err := grpcclient.NewClient(
+		sessionAddress,
+		grpcclient.WithTransportCredentials(insecure.NewCredentials()),
+	)
+	if err != nil {
+		return fmt.Errorf("create session client: %w", err)
+	}
+	defer func() { err = errors.Join(err, sessionConn.Close()) }()
+	authzConn, err := grpcclient.NewClient(
+		authzAddress,
+		grpcclient.WithTransportCredentials(insecure.NewCredentials()),
+	)
+	if err != nil {
+		return fmt.Errorf("create authz client: %w", err)
+	}
+	defer func() { err = errors.Join(err, authzConn.Close()) }()
+	httpServer, err := newHTTPServer(logger, conf, svc,
+		sessionapi.NewSessionServiceClient(sessionConn), authzapi.NewAuthzServiceClient(authzConn))
 	if err != nil {
 		return err
 	}

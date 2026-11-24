@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"strings"
 	"unicode/utf8"
 	"uuid"
 
@@ -79,11 +80,17 @@ func (r *productRepository) GetByID(id uuid.UUID) (*domain.Product, error) {
 	return &product, nil
 }
 
-func (r *productRepository) List() ([]domain.Product, error) {
+func (r *productRepository) List(filter domain.ProductFilter) ([]domain.Product, error) {
+	if filter.Limit <= 0 || filter.Limit > 100 || filter.Offset < 0 {
+		return nil, domain.ErrInvalidProductFilter
+	}
+	escaped := strings.NewReplacer("!", "!!", "%", "!%", "_", "!_").Replace(filter.Search)
 	rows, err := r.client.QueryContext(
 		r.ctx,
 		"product.list",
-		`SELECT id, name, unit FROM products ORDER BY id`,
+		`SELECT id, name, unit FROM products WHERE name COLLATE utf8mb4_0900_ai_ci LIKE ? ESCAPE '!'
+ORDER BY name COLLATE utf8mb4_0900_ai_ci, id LIMIT ? OFFSET ?`,
+		"%"+escaped+"%", filter.Limit, filter.Offset,
 	)
 	if err != nil {
 		return nil, fmt.Errorf("list products: %w", err)
