@@ -8,12 +8,13 @@ import (
 )
 
 func TestStock(t *testing.T) {
-	id := uuid.New()
-	_, err := NewStock(id, 1, 2)
+	inventoryID := uuid.New()
+	productID := uuid.New()
+	_, err := NewStock(inventoryID, productID, 1, 2)
 	require.ErrorIs(t, err, ErrInvalidStock)
-	_, err = NewStock(id, -1, 0)
+	_, err = NewStock(inventoryID, productID, -1, 0)
 	require.ErrorIs(t, err, ErrInvalidStock)
-	stock, err := NewStock(id, 10, 0)
+	stock, err := NewStock(inventoryID, productID, 10, 0)
 	require.NoError(t, err)
 	_, err = stock.Reserve(0)
 	require.ErrorIs(t, err, ErrInvalidReservation)
@@ -34,4 +35,68 @@ func TestStock(t *testing.T) {
 	require.EqualValues(t, 10, stock.Available())
 	_, err = stock.Release(7)
 	require.ErrorIs(t, err, ErrInvalidStock)
+}
+
+func TestNilInventoryID(t *testing.T) {
+	inventoryID := uuid.Nil()
+	productID := uuid.New()
+	_, err := NewStock(inventoryID, productID, 2, 1)
+	require.ErrorIs(t, err, ErrInvalidStock)
+}
+
+func TestRemove(t *testing.T) {
+	inventoryID := uuid.New()
+	productID := uuid.New()
+	stock, err := NewStock(inventoryID, productID, 5, 1)
+	require.NoError(t, err)
+
+	stock, err = stock.Remove(2)
+	require.NoError(t, err)
+	require.Equal(t, int64(3), stock.Quantity)
+}
+
+func TestRemoveAll(t *testing.T) {
+	inventoryID := uuid.New()
+	productID := uuid.New()
+	stock, err := NewStock(inventoryID, productID, 5, 0)
+	require.NoError(t, err)
+
+	stock, err = stock.Remove(5)
+	require.NoError(t, err)
+	require.Zero(t, stock.Quantity)
+}
+
+func TestRemoveMoreThanAvailable(t *testing.T) {
+	inventoryID := uuid.New()
+	productID := uuid.New()
+	stock, err := NewStock(inventoryID, productID, 5, 1)
+	require.NoError(t, err)
+
+	_, err = stock.Remove(5)
+	require.ErrorIs(t, err, ErrInsufficientStock)
+}
+
+func TestRemoveInvalidQuantity(t *testing.T) {
+	inventoryID := uuid.New()
+	productID := uuid.New()
+	stock, err := NewStock(inventoryID, productID, 5, 1)
+	require.NoError(t, err)
+
+	_, err = stock.Remove(-2)
+	require.ErrorIs(t, err, ErrInvalidQuantityToRemove)
+}
+
+func TestImmutabilityOfInventoryID(t *testing.T) {
+	inventoryID := uuid.New()
+	productID := uuid.New()
+	stock, err := NewStock(inventoryID, productID, 5, 1)
+	require.NoError(t, err)
+
+	stock, err = stock.Reserve(1)
+	require.NoError(t, err)
+
+	stock, err = stock.Release(2)
+	require.NoError(t, err)
+
+	require.Equal(t, inventoryID, stock.InventoryID)
 }
