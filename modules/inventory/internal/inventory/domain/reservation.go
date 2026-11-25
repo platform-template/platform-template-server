@@ -28,21 +28,24 @@ const (
 )
 
 type Reservation struct {
-	id     uuid.UUID
-	status ReservationStatus
-	items  []ReservationItem
+	id          uuid.UUID
+	inventoryID uuid.UUID
+	status      ReservationStatus
+	items       []ReservationItem
 }
 
-func NewReservation(id uuid.UUID, items []ReservationItem) (*Reservation, error) {
-	return RestoreReservation(id, ReservationActive, items)
+func NewReservation(id, inventoryID uuid.UUID, items []ReservationItem) (*Reservation, error) {
+	return RestoreReservation(id, inventoryID, ReservationActive, items)
 }
 
 func RestoreReservation(
 	id uuid.UUID,
+	inventoryID uuid.UUID,
 	status ReservationStatus,
 	items []ReservationItem,
 ) (*Reservation, error) {
 	if id == uuid.Nil() ||
+		inventoryID == uuid.Nil() ||
 		(status != ReservationActive && status != ReservationCancelled && status != ReservationConsumed) ||
 		(status != ReservationCancelled && len(items) == 0) {
 		return nil, ErrInvalidReservation
@@ -61,13 +64,16 @@ func RestoreReservation(
 		}
 	}
 	return &Reservation{
-		id:     id,
-		status: status,
-		items:  copyItems,
+		id:          id,
+		inventoryID: inventoryID,
+		status:      status,
+		items:       copyItems,
 	}, nil
 }
 
 func (reservation *Reservation) ID() uuid.UUID { return reservation.id }
+
+func (reservation *Reservation) InventoryID() uuid.UUID { return reservation.inventoryID }
 
 func (reservation *Reservation) Status() ReservationStatus { return reservation.status }
 
@@ -98,7 +104,8 @@ func (reservation *Reservation) Consume() (bool, error) {
 }
 
 func (reservation *Reservation) Matches(other *Reservation) bool {
-	if len(reservation.items) != len(other.items) {
+	if len(reservation.items) != len(other.items) ||
+		reservation.inventoryID != other.inventoryID {
 		return false
 	}
 	for index := range reservation.items {
@@ -110,8 +117,8 @@ func (reservation *Reservation) Matches(other *Reservation) bool {
 }
 
 type ReservationRepository interface {
-	GetByID(uuid.UUID) (*Reservation, error)
+	GetByID(inventoryID, id uuid.UUID) (*Reservation, error)
 	Reserve(*Reservation) error
-	Release(uuid.UUID) error
-	Consume(uuid.UUID) error
+	Release(inventoryID, id uuid.UUID) error
+	Consume(inventoryID, id uuid.UUID) error
 }

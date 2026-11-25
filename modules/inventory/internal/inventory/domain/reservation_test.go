@@ -8,21 +8,21 @@ import (
 )
 
 func TestReservation(t *testing.T) {
-	id, productID := uuid.New(), uuid.New()
+	id, productID, inventoryID := uuid.New(), uuid.New(), uuid.New()
 	item := ReservationItem{
 		ProductID: productID,
 		Quantity:  2,
 	}
-	_, err := NewReservation(id, []ReservationItem{item, item})
+	_, err := NewReservation(id, inventoryID, []ReservationItem{item, item})
 	require.ErrorIs(t, err, ErrInvalidReservation)
-	_, err = NewReservation(id, []ReservationItem{
+	_, err = NewReservation(id, inventoryID, []ReservationItem{
 		{
 			ProductID: productID,
 			Quantity:  0,
 		},
 	})
 	require.ErrorIs(t, err, ErrInvalidReservation)
-	reservation, err := NewReservation(id, []ReservationItem{item})
+	reservation, err := NewReservation(id, inventoryID, []ReservationItem{item})
 	require.NoError(t, err)
 	items := reservation.Items()
 	items[0].Quantity = 99
@@ -36,12 +36,12 @@ func TestReservation(t *testing.T) {
 	_, err = reservation.Consume()
 	require.ErrorIs(t, err, ErrReservationCancelled)
 	require.Equal(t, ReservationCancelled, reservation.Status())
-	marker, err := RestoreReservation(id, ReservationCancelled, nil)
+	marker, err := RestoreReservation(id, inventoryID, ReservationCancelled, nil)
 	require.NoError(t, err)
 	changed, err = marker.Cancel()
 	require.NoError(t, err)
 	require.False(t, changed)
-	consumed, err := NewReservation(id, []ReservationItem{item})
+	consumed, err := NewReservation(id, inventoryID, []ReservationItem{item})
 	require.NoError(t, err)
 	changed, err = consumed.Consume()
 	require.NoError(t, err)
@@ -51,4 +51,31 @@ func TestReservation(t *testing.T) {
 	require.False(t, changed)
 	_, err = consumed.Cancel()
 	require.ErrorIs(t, err, ErrReservationConsumed)
+}
+
+func TestMatchComparesInventoryID(t *testing.T) {
+	id, productID, inventoryID := uuid.New(), uuid.New(), uuid.New()
+	inventoryID2 := uuid.New()
+	item1 := ReservationItem{
+		ProductID: productID,
+		Quantity:  2,
+	}
+	reservation1, err := NewReservation(id, inventoryID, []ReservationItem{item1})
+	require.NoError(t, err)
+	reservation2, err := NewReservation(id, inventoryID2, []ReservationItem{
+		{
+			ProductID: productID,
+			Quantity:  2,
+		},
+	})
+	reservation3, err := NewReservation(id, inventoryID, []ReservationItem{
+		{
+			ProductID: productID,
+			Quantity:  2,
+		},
+	})
+	require.NoError(t, err)
+
+	require.False(t, reservation1.Matches(reservation2))
+	require.True(t, reservation1.Matches(reservation3))
 }
