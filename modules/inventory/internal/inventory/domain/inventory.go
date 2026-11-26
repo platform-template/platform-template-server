@@ -51,5 +51,4 @@ type InventoryRepository interface {
 	Update(*Inventory) error
 	GetByID(uuid.UUID) (*Inventory, error)
 	List() ([]*Inventory, error)
-	Delete(uuid.UUID) error
 }

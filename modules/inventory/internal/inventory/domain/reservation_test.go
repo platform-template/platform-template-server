@@ -68,6 +68,7 @@ func TestMatchComparesInventoryID(t *testing.T) {
 			Quantity:  2,
 		},
 	})
+	require.NoError(t, err)
 	reservation3, err := NewReservation(id, inventoryID, []ReservationItem{
 		{
 			ProductID: productID,

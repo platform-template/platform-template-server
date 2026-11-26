@@ -27,6 +27,10 @@ func (p *RepositoryProvider) Product(ctx context.Context) domain.ProductReposito
 	return repository.NewProductRepository(ctx, p.client)
 }
 
+func (p *RepositoryProvider) Inventory(ctx context.Context) domain.InventoryRepository {
+	return repository.NewInventoryRepository(ctx, p.client)
+}
+
 func (p *RepositoryProvider) Stock(ctx context.Context) domain.StockRepository {
 	return repository.NewStockRepository(ctx, p.client)
 }

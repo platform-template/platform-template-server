@@ -5,10 +5,10 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
-	"math"
 	"uuid"
 
 	"github.com/distributed-programming-2026/go-sdk/pkg/mysql"
+	driver "github.com/go-sql-driver/mysql"
 
 	"inventory/internal/inventory/domain"
 )
@@ -19,20 +19,35 @@ type stockRepository struct {
 }
 
 func NewStockRepository(ctx context.Context, client mysql.ClientContext) domain.StockRepository {
-	return &stockRepository{
-		ctx:    ctx,
-		client: client,
+	return &stockRepository{ctx: ctx, client: client}
+}
+
+func (r *stockRepository) Create(stock domain.Stock) error {
+	if _, err := domain.NewStock(
+		stock.InventoryID,
+		stock.ProductID,
+		stock.Quantity,
+		stock.ReservedQuantity,
+	); err != nil {
+		return err
 	}
+	_, err := r.client.ExecContext(r.ctx, "stock.create", `INSERT INTO stocks
+		(inventory_id, product_id, quantity, reserved_quantity) VALUES (?, ?, ?, ?)`,
+		stock.InventoryID[:], stock.ProductID[:], stock.Quantity, stock.ReservedQuantity)
+	if err != nil {
+		return fmt.Errorf("create stock: %w", err)
+	}
+	return nil
 }
 
-func (r *stockRepository) GetByProductID(id uuid.UUID) (*domain.Stock, error) {
-	return getStock(r.ctx, r.client, id, false)
+func (r *stockRepository) GetByProductID(inventoryID, productID uuid.UUID) (*domain.Stock, error) {
+	return getStock(r.ctx, r.client, inventoryID, productID, false)
 }
 
-func (r *stockRepository) GetByProductIDs(ids []uuid.UUID) ([]domain.Stock, error) {
+func (r *stockRepository) GetByProductIDs(inventoryID uuid.UUID, ids []uuid.UUID) ([]domain.Stock, error) {
 	stocks := make([]domain.Stock, 0, len(ids))
 	for _, id := range ids {
-		stock, err := r.GetByProductID(id)
+		stock, err := r.GetByProductID(inventoryID, id)
 		if err != nil {
 			return nil, err
 		}
@@ -43,52 +58,115 @@ func (r *stockRepository) GetByProductIDs(ids []uuid.UUID) ([]domain.Stock, erro
 	return stocks, nil
 }
 
-func (r *stockRepository) Add(id uuid.UUID, quantity int64) error {
-	if id == uuid.Nil() || quantity <= 0 {
+func (r *stockRepository) List(inventoryID uuid.UUID) ([]domain.Stock, error) {
+	rows, err := r.client.QueryContext(r.ctx, "stock.list", `SELECT product_id, quantity, reserved_quantity
+		FROM stocks WHERE inventory_id = ? ORDER BY product_id`, inventoryID[:])
+	if err != nil {
+		return nil, fmt.Errorf("list stocks: %w", err)
+	}
+	defer rows.Close()
+	stocks := make([]domain.Stock, 0)
+	for rows.Next() {
+		var id []byte
+		var quantity, reserved int64
+		if err := rows.Scan(&id, &quantity, &reserved); err != nil {
+			return nil, fmt.Errorf("scan stock: %w", err)
+		}
+		if len(id) != 16 {
+			return nil, errors.New("invalid product ID")
+		}
+		var productID uuid.UUID
+		copy(productID[:], id)
+		stock, err := domain.NewStock(inventoryID, productID, quantity, reserved)
+		if err != nil {
+			return nil, fmt.Errorf("restore stock: %w", err)
+		}
+		stocks = append(stocks, stock)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate stocks: %w", err)
+	}
+	return stocks, nil
+}
+
+func (r *stockRepository) Add(inventoryID, productID uuid.UUID, quantity int64) error {
+	if inventoryID == uuid.Nil() || productID == uuid.Nil() || quantity <= 0 {
 		return domain.ErrInvalidStock
 	}
-	result, err := r.client.ExecContext(
-		r.ctx,
-		"stock.add",
-		`UPDATE stocks SET quantity = quantity + ? WHERE product_id = ? AND quantity <= ?`,
-		quantity,
-		id[:],
-		int64(math.MaxInt64)-quantity,
-	)
+	_, err := r.client.ExecContext(r.ctx, "stock.add", `INSERT INTO stocks
+		(inventory_id, product_id, quantity, reserved_quantity) VALUES (?, ?, ?, 0)
+		ON DUPLICATE KEY UPDATE quantity = quantity + VALUES(quantity)`, inventoryID[:], productID[:], quantity)
+	var mysqlErr *driver.MySQLError
+	if errors.As(err, &mysqlErr) && mysqlErr.Number == 1690 {
+		return domain.ErrInvalidStock
+	}
 	if err != nil {
 		return fmt.Errorf("add stock: %w", err)
-	}
-	count, err := result.RowsAffected()
-	if err != nil {
-		return fmt.Errorf("count updated stock: %w", err)
-	}
-	if count == 0 {
-		stock, err := r.GetByProductID(id)
-		if err != nil {
-			return err
-		}
-		if stock == nil {
-			return domain.ErrProductNotFound
-		}
-		return domain.ErrInvalidStock
 	}
 	return nil
 }
 
-func getStock(ctx context.Context, client mysql.ClientContext, id uuid.UUID, lock bool) (*domain.Stock, error) {
-	query := `SELECT quantity, reserved_quantity FROM stocks WHERE product_id = ?`
+func (r *stockRepository) Remove(inventoryID, productID uuid.UUID, quantity int64) error {
+	if inventoryID == uuid.Nil() || productID == uuid.Nil() || quantity <= 0 {
+		return domain.ErrInvalidQuantityToRemove
+	}
+	result, err := r.client.ExecContext(r.ctx, "stock.remove", `UPDATE stocks SET quantity = quantity - ?
+		WHERE inventory_id = ? AND product_id = ? AND quantity - reserved_quantity >= ?`,
+		quantity, inventoryID[:], productID[:], quantity)
+	if err != nil {
+		return fmt.Errorf("remove stock: %w", err)
+	}
+	count, err := result.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("count removed stock: %w", err)
+	}
+	if count == 0 {
+		return domain.ErrInsufficientStock
+	}
+	return nil
+}
+
+func (r *stockRepository) Delete(inventoryID, productID uuid.UUID) error {
+	result, err := r.client.ExecContext(r.ctx, "stock.delete", `DELETE FROM stocks
+		WHERE inventory_id = ? AND product_id = ? AND quantity = 0 AND reserved_quantity = 0`, inventoryID[:], productID[:])
+	if err != nil {
+		return fmt.Errorf("delete stock: %w", err)
+	}
+	count, err := result.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("count deleted stock: %w", err)
+	}
+	if count == 0 {
+		stock, err := r.GetByProductID(inventoryID, productID)
+		if err != nil {
+			return err
+		}
+		if stock != nil {
+			return domain.ErrInvalidStock
+		}
+	}
+	return nil
+}
+
+func getStock(
+	ctx context.Context,
+	client mysql.ClientContext,
+	inventoryID, productID uuid.UUID,
+	lock bool,
+) (*domain.Stock, error) {
+	query := `SELECT quantity, reserved_quantity FROM stocks WHERE inventory_id = ? AND product_id = ?`
 	if lock {
 		query += ` FOR UPDATE`
 	}
 	var quantity, reserved int64
-	err := client.QueryRowContext(ctx, "stock.get", query, id[:]).Scan(&quantity, &reserved)
+	err := client.QueryRowContext(ctx, "stock.get", query, inventoryID[:], productID[:]).Scan(&quantity, &reserved)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, nil
 	}
 	if err != nil {
 		return nil, fmt.Errorf("get stock: %w", err)
 	}
-	stock, err := domain.NewStock(id, quantity, reserved)
+	stock, err := domain.NewStock(inventoryID, productID, quantity, reserved)
 	if err != nil {
 		return nil, fmt.Errorf("restore stock: %w", err)
 	}

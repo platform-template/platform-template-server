@@ -75,4 +75,5 @@ run = [
     "docker build --tag distributed-programming-inventory:integration .",
     "go test -v -count=1 ./internal/integration-tests",
     "go test -v -count=1 ./internal/persistence-tests",
+    "go test -tags=integration -v -count=1 ./internal/inventory/infra/mysql/migrations",
 ]

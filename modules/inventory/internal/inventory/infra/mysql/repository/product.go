@@ -27,18 +27,22 @@ func NewProductRepository(ctx context.Context, client mysql.ClientContext) domai
 	}
 }
 
-func (r *productRepository) Create(product domain.Product) error {
-	if _, err := domain.NewProduct(product.ID, product.Name, product.Unit); err != nil {
+func (r *productRepository) Create(product *domain.Product) error {
+	if product == nil {
+		return domain.ErrInvalidProduct
+	}
+	if _, err := domain.NewProduct(product.ID(), product.Name(), product.Unit()); err != nil {
 		return err
 	}
-	if !utf8.ValidString(product.Name) || utf8.RuneCountInString(product.Name) > 255 {
+	if !utf8.ValidString(product.Name()) || utf8.RuneCountInString(product.Name()) > 255 {
 		return fmt.Errorf("product name exceeds storage constraints")
 	}
+	id := product.ID()
 	_, err := r.client.ExecContext(
 		r.ctx,
 		"product.create",
 		`INSERT INTO products (id, name, unit) VALUES (?, ?, ?)`,
-		product.ID[:], product.Name, string(product.Unit),
+		id[:], product.Name(), string(product.Unit()),
 	)
 	var mysqlErr *driver.MySQLError
 	if errors.As(err, &mysqlErr) && mysqlErr.Number == 1062 {
@@ -47,14 +51,37 @@ func (r *productRepository) Create(product domain.Product) error {
 	if err != nil {
 		return fmt.Errorf("create product: %w", err)
 	}
-	_, err = r.client.ExecContext(
-		r.ctx,
-		"stock.create",
-		`INSERT INTO stocks (product_id, quantity, reserved_quantity) VALUES (?, 0, 0)`,
-		product.ID[:],
-	)
+	return nil
+}
+
+func (r *productRepository) Update(product *domain.Product) error {
+	if product == nil {
+		return domain.ErrInvalidProduct
+	}
+	if _, err := domain.NewProduct(product.ID(), product.Name(), product.Unit()); err != nil {
+		return err
+	}
+	if !utf8.ValidString(product.Name()) || utf8.RuneCountInString(product.Name()) > 255 {
+		return fmt.Errorf("product name exceeds storage constraints")
+	}
+	id := product.ID()
+	result, err := r.client.ExecContext(r.ctx, "product.update",
+		`UPDATE products SET name = ? WHERE id = ?`, product.Name(), id[:])
 	if err != nil {
-		return fmt.Errorf("create stock: %w", err)
+		return fmt.Errorf("update product: %w", err)
+	}
+	count, err := result.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("count updated products: %w", err)
+	}
+	if count == 0 {
+		existing, err := r.GetByID(id)
+		if err != nil {
+			return err
+		}
+		if existing == nil {
+			return domain.ErrProductNotFound
+		}
 	}
 	return nil
 }
@@ -80,7 +107,7 @@ func (r *productRepository) GetByID(id uuid.UUID) (*domain.Product, error) {
 	return &product, nil
 }
 
-func (r *productRepository) List(filter domain.ProductFilter) ([]domain.Product, error) {
+func (r *productRepository) List(filter domain.ProductFilter) ([]*domain.Product, error) {
 	if filter.Limit <= 0 || filter.Limit > 100 || filter.Offset < 0 {
 		return nil, domain.ErrInvalidProductFilter
 	}
@@ -96,7 +123,7 @@ ORDER BY name COLLATE utf8mb4_0900_ai_ci, id LIMIT ? OFFSET ?`,
 		return nil, fmt.Errorf("list products: %w", err)
 	}
 	defer rows.Close()
-	products := make([]domain.Product, 0)
+	products := make([]*domain.Product, 0)
 	for rows.Next() {
 		var id []byte
 		var name, unit string
@@ -112,7 +139,7 @@ ORDER BY name COLLATE utf8mb4_0900_ai_ci, id LIMIT ? OFFSET ?`,
 		if err != nil {
 			return nil, fmt.Errorf("restore product: %w", err)
 		}
-		products = append(products, product)
+		products = append(products, &product)
 	}
 	if err := rows.Err(); err != nil {
 		return nil, fmt.Errorf("iterate products: %w", err)
