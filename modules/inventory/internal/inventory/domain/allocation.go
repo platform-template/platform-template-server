@@ -109,6 +109,7 @@ type AllocationIdentity struct {
 type AllocationRepository interface {
 	BindIdentity(identity AllocationIdentity) error
 	Cancel(operationID uuid.UUID) (bool, error)
+	Consume(operationID uuid.UUID) (bool, error)
 	Allocate(
 		operationID uuid.UUID,
 		inventoryIDs []uuid.UUID,

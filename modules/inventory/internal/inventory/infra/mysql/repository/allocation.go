@@ -193,9 +193,9 @@ func (r *allocationRepository) Allocate(
 }
 func (r *allocationRepository) existing(id uuid.UUID, expected []byte) (domain.AllocationResult, bool, error) {
 	var hash, payload []byte
-	var cancelled bool
-	err := r.client.QueryRowContext(r.ctx, "allocation.existing", `SELECT request_hash, result, cancelled FROM allocation_operations WHERE id = ? FOR UPDATE`, id[:]).
-		Scan(&hash, &payload, &cancelled)
+	var cancelled, consumed bool
+	err := r.client.QueryRowContext(r.ctx, "allocation.existing", `SELECT request_hash, result, cancelled, consumed FROM allocation_operations WHERE id = ? FOR UPDATE`, id[:]).
+		Scan(&hash, &payload, &cancelled, &consumed)
 	if err != nil {
 		return domain.AllocationResult{}, false, fmt.Errorf("get allocation: %w", err)
 	}
@@ -207,6 +207,9 @@ func (r *allocationRepository) existing(id uuid.UUID, expected []byte) (domain.A
 	}
 	if cancelled {
 		return domain.AllocationResult{}, false, domain.ErrAllocationCancelled
+	}
+	if consumed {
+		return domain.AllocationResult{}, false, domain.ErrReservationConsumed
 	}
 	if len(payload) == 0 {
 		return domain.AllocationResult{}, false, errors.New("incomplete allocation")
@@ -248,14 +251,17 @@ func (r *allocationRepository) Cancel(operationID uuid.UUID) (bool, error) {
 		return false, fmt.Errorf("insert cancellation marker: %w", err)
 	}
 	var payload []byte
-	var cancelled bool
-	err = r.client.QueryRowContext(r.ctx, "allocation.lock_for_cancel", `SELECT result, cancelled FROM allocation_operations WHERE id = ? FOR UPDATE`, operationID[:]).
-		Scan(&payload, &cancelled)
+	var cancelled, consumed bool
+	err = r.client.QueryRowContext(r.ctx, "allocation.lock_for_cancel", `SELECT result, cancelled, consumed FROM allocation_operations WHERE id = ? FOR UPDATE`, operationID[:]).
+		Scan(&payload, &cancelled, &consumed)
 	if err != nil {
 		return false, fmt.Errorf("lock allocation for cancellation: %w", err)
 	}
 	if cancelled {
 		return false, nil
+	}
+	if consumed {
+		return false, domain.ErrReservationConsumed
 	}
 	if len(payload) == 0 {
 		return false, errors.New("incomplete allocation")
@@ -294,6 +300,72 @@ func (r *allocationRepository) Cancel(operationID uuid.UUID) (bool, error) {
 		operationID[:],
 	); err != nil {
 		return false, fmt.Errorf("cancel allocation: %w", err)
+	}
+	return true, nil
+}
+
+// Consume requires a completed, fully-reserved allocation. It serializes with cancellation
+// on the allocation row so that a meal can be either cancelled or consumed, never both.
+func (r *allocationRepository) Consume(operationID uuid.UUID) (bool, error) {
+	if operationID == uuid.Nil() {
+		return false, domain.ErrInvalidAllocation
+	}
+	var payload []byte
+	var cancelled, consumed bool
+	err := r.client.QueryRowContext(r.ctx, "allocation.lock_for_consumption", `SELECT result, cancelled, consumed FROM allocation_operations WHERE id = ? FOR UPDATE`, operationID[:]).
+		Scan(&payload, &cancelled, &consumed)
+	if errors.Is(err, sql.ErrNoRows) {
+		return false, domain.ErrAllocationCancelled
+	}
+	if err != nil {
+		return false, fmt.Errorf("lock allocation for consumption: %w", err)
+	}
+	if cancelled {
+		return false, domain.ErrAllocationCancelled
+	}
+	if consumed {
+		return false, nil
+	}
+	if len(payload) == 0 {
+		return false, errors.New("incomplete allocation")
+	}
+	var result domain.AllocationResult
+	if err := json.Unmarshal(payload, &result); err != nil {
+		return false, fmt.Errorf("decode allocation for consumption: %w", err)
+	}
+	if len(result.Lines) == 0 || len(result.Shortages) != 0 {
+		return false, domain.ErrInvalidAllocation
+	}
+	reservations := make(map[uuid.UUID]uuid.UUID)
+	for _, line := range result.Lines {
+		if line.ReservationID != allocationReservationID(operationID, line.InventoryID) {
+			return false, domain.ErrInvalidAllocation
+		}
+		if existing, ok := reservations[line.InventoryID]; ok && existing != line.ReservationID {
+			return false, domain.ErrInvalidAllocation
+		}
+		reservations[line.InventoryID] = line.ReservationID
+	}
+	inventories := make([]uuid.UUID, 0, len(reservations))
+	for inventoryID := range reservations {
+		inventories = append(inventories, inventoryID)
+	}
+	sort.Slice(inventories, func(i, j int) bool { return inventories[i].String() < inventories[j].String() })
+	for _, inventoryID := range inventories {
+		if _, err := NewReservationRepository(
+			r.ctx,
+			r.client,
+		).Consume(inventoryID, reservations[inventoryID]); err != nil {
+			return false, fmt.Errorf("consume allocation reservation: %w", err)
+		}
+	}
+	if _, err := r.client.ExecContext(
+		r.ctx,
+		"allocation.consume",
+		`UPDATE allocation_operations SET consumed = TRUE WHERE id = ?`,
+		operationID[:],
+	); err != nil {
+		return false, fmt.Errorf("mark allocation consumed: %w", err)
 	}
 	return true, nil
 }

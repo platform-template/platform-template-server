@@ -232,4 +232,36 @@ func testPartialAllocation(
 	stillReserved, err := service.GetStock(ctx, otherLine.InventoryID, consumedProduct.ID())
 	require.NoError(t, err)
 	require.EqualValues(t, 2, stillReserved.ReservedQuantity)
+
+	completedProduct, err := service.CreateProduct(ctx, "Completed meal allocation", domain.Unit("g"))
+	require.NoError(t, err)
+	require.NoError(t, service.AddStock(ctx, first.ID(), completedProduct.ID(), 2))
+	require.NoError(t, service.AddStock(ctx, second.ID(), completedProduct.ID(), 2))
+	completedID := uuid.New()
+	require.NoError(t, execute(completedID, []domain.ReservationItem{{ProductID: completedProduct.ID(), Quantity: 4}}))
+	consume := func(id uuid.UUID) (bool, error) {
+		operationCtx, done := context.WithCancel(ctx)
+		defer done()
+		var changed bool
+		err := unit.ExecuteWithRepositoryProvider(operationCtx, func(p *inventorymysql.RepositoryProvider) error {
+			var err error
+			changed, err = p.Allocation(operationCtx).Consume(id)
+			return err
+		})
+		return changed, err
+	}
+	changed, err = consume(completedID)
+	require.NoError(t, err)
+	require.True(t, changed)
+	changed, err = consume(completedID)
+	require.NoError(t, err)
+	require.False(t, changed)
+	for _, inventoryID := range inventories {
+		stock, err := service.GetStock(ctx, inventoryID, completedProduct.ID())
+		require.NoError(t, err)
+		require.Zero(t, stock.Quantity)
+		require.Zero(t, stock.ReservedQuantity)
+	}
+	_, err = cancel(completedID)
+	require.ErrorIs(t, err, domain.ErrReservationConsumed)
 }
