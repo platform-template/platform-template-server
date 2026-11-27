@@ -1,0 +1,14 @@
+kind: gateway/service/v1
+name: shopping
+weight: 100
+routes:
+  - pattern: '^/shopping/api/.*$'
+    rewrite:
+      old: '^/shopping/(.*)$'
+      new: '/$1'
+    target: shopping-service:8082
+    interceptors:
+      - id: shopping-interceptor
+        processingMode:
+          requestHeaders: true
+          responseHeaders: true

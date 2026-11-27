@@ -11,5 +11,6 @@ use (
 	./modules/notifications
 	./modules/recipes
 	./modules/session
+	./modules/shopping
 	lib
 )

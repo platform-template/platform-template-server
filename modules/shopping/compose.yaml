@@ -1,0 +1,33 @@
+services:
+  shopping-service:
+    image: distributed-programming-shopping:local
+    build:
+      context: ./modules/shopping
+      dockerfile: Dockerfile
+    environment:
+      SHOPPING_MYSQL_ADDRESS: mysql:3306
+      SHOPPING_AMQP_URL: amqp://local:local@rabbitmq:5672/
+    ports:
+      - "${SHOPPING_GRPC_PORT:-8081}:8081"
+      - "${SHOPPING_HTTP_PORT:-8082}:8082"
+    depends_on:
+      mysql:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+
+  shopping-message-handler:
+    image: distributed-programming-shopping:local
+    command: [message-handler]
+    environment:
+      SHOPPING_MYSQL_ADDRESS: mysql:3306
+      SHOPPING_AMQP_URL: amqp://local:local@rabbitmq:5672/
+    ports:
+      - "${SHOPPING_MESSAGE_HANDLER_PORT:-8083}:8082"
+    depends_on:
+      shopping-service:
+        condition: service_started
+      mysql:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy

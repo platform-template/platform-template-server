@@ -1,0 +1,9 @@
+syntax = "proto3";
+package shoppingEvents;
+
+option go_package = "/.;shoppingevents";
+
+message Echo {
+  string ID = 1;
+  string Body = 2;
+}
