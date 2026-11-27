@@ -1,0 +1,14 @@
+kind: gateway/service/v1
+name: recipes
+weight: 100
+routes:
+  - pattern: '^/recipes/api/.*$'
+    rewrite:
+      old: '^/recipes/(.*)$'
+      new: '/$1'
+    target: recipes-service:8082
+    interceptors:
+      - id: recipes-interceptor
+        processingMode:
+          requestHeaders: true
+          responseHeaders: true

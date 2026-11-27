@@ -8,6 +8,7 @@ use (
 	./modules/identity
 	./modules/inventory
 	./modules/notifications
+	./modules/recipes
 	./modules/session
 	lib
 )

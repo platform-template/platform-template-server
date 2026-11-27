@@ -1,0 +1,16 @@
+syntax = "proto3";
+package recipesInternalAPI;
+
+option go_package = "/.;recipesinternalapi";
+
+service RecipesService {
+  rpc Echo(EchoRequest) returns (EchoResponse);
+}
+
+message EchoRequest {
+  string Body = 1;
+}
+
+message EchoResponse {
+  string OperationID = 1;
+}

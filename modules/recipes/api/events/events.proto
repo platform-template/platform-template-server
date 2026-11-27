@@ -1,0 +1,9 @@
+syntax = "proto3";
+package recipesEvents;
+
+option go_package = "/.;recipesevents";
+
+message Echo {
+  string ID = 1;
+  string Body = 2;
+}
