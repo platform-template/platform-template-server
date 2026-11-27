@@ -28,14 +28,8 @@ func (s *Service) AllocateMeal(ctx context.Context, request MealAllocation) erro
 		return domain.ErrInvalidAllocation
 	}
 	err := s.unit.ExecuteWithRepositoryProvider(ctx, func(p *mysql.RepositoryProvider) error {
-		for _, inventoryID := range request.InventoryIDs {
-			owned, err := p.InventoryOwnership(ctx).IsOwner(inventoryID, request.ActorID)
-			if err != nil {
-				return err
-			}
-			if !owned {
-				return domain.ErrInventoryNotFound
-			}
+		if err := requireInventoryOwners(ctx, p, request.ActorID, request.InventoryIDs); err != nil {
+			return err
 		}
 		for _, item := range request.Items {
 			product, err := p.Product(ctx).GetByID(item.ProductID)
@@ -46,7 +40,21 @@ func (s *Service) AllocateMeal(ctx context.Context, request MealAllocation) erro
 				return domain.ErrProductNotFound
 			}
 		}
+		identity := domain.AllocationIdentity{
+			Revision:       request.Revision,
+			ActorID:        request.ActorID,
+			PlanID:         request.PlanID,
+			ItemID:         request.ItemID,
+			ShoppingListID: request.ShoppingListID,
+			InventoryIDs:   request.InventoryIDs,
+		}
+		if err := p.Allocation(ctx).BindIdentity(identity); err != nil {
+			return err
+		}
 		result, created, err := p.Allocation(ctx).Allocate(request.Revision, request.InventoryIDs, request.Items)
+		if errors.Is(err, domain.ErrAllocationCancelled) {
+			return nil
+		}
 		if err != nil || !created {
 			return err
 		}
@@ -82,6 +90,24 @@ func (s *Service) AllocateMeal(ctx context.Context, request MealAllocation) erro
 	})
 	if err != nil {
 		return fmt.Errorf("allocate meal: %w", err)
+	}
+	return nil
+}
+
+func requireInventoryOwners(
+	ctx context.Context,
+	p *mysql.RepositoryProvider,
+	actor uuid.UUID,
+	inventoryIDs []uuid.UUID,
+) error {
+	for _, inventoryID := range inventoryIDs {
+		owned, err := p.InventoryOwnership(ctx).IsOwner(inventoryID, actor)
+		if err != nil {
+			return err
+		}
+		if !owned {
+			return domain.ErrInventoryNotFound
+		}
 	}
 	return nil
 }

@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"crypto/sha256"
+	"database/sql"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -23,6 +24,63 @@ type allocationRepository struct {
 
 func NewAllocationRepository(ctx context.Context, client mysql.ClientContext) domain.AllocationRepository {
 	return &allocationRepository{ctx: ctx, client: client}
+}
+
+// BindIdentity must be called within the same transaction as allocation or cancellation.
+func (r *allocationRepository) BindIdentity(identity domain.AllocationIdentity) error {
+	if identity.Revision == uuid.Nil() || identity.ActorID == uuid.Nil() || identity.PlanID == uuid.Nil() ||
+		identity.ItemID == uuid.Nil() ||
+		identity.ShoppingListID == uuid.Nil() ||
+		len(identity.InventoryIDs) == 0 {
+		return domain.ErrInvalidAllocation
+	}
+	identity.InventoryIDs = append([]uuid.UUID(nil), identity.InventoryIDs...)
+	sort.Slice(
+		identity.InventoryIDs,
+		func(i, j int) bool { return identity.InventoryIDs[i].String() < identity.InventoryIDs[j].String() },
+	)
+	for index, id := range identity.InventoryIDs {
+		if id == uuid.Nil() || (index > 0 && identity.InventoryIDs[index-1] == id) {
+			return domain.ErrInvalidAllocation
+		}
+	}
+	data, err := json.Marshal(identity)
+	if err != nil {
+		return fmt.Errorf("encode allocation identity: %w", err)
+	}
+	hash := sha256.Sum256(data)
+	_, err = r.client.ExecContext(
+		r.ctx,
+		"allocation.bind_identity",
+		`INSERT INTO allocation_identities (revision,identity_hash) VALUES (?, ?)`,
+		identity.Revision[:],
+		hash[:],
+	)
+	var mysqlErr *driver.MySQLError
+	if errors.As(err, &mysqlErr) && mysqlErr.Number == 1062 {
+		var existing []byte
+		if err := r.client.QueryRowContext(r.ctx, "allocation.get_identity", `SELECT identity_hash FROM allocation_identities WHERE revision = ? FOR UPDATE`, identity.Revision[:]).
+			Scan(&existing); err != nil {
+			return fmt.Errorf("get allocation identity: %w", err)
+		}
+		if !bytes.Equal(existing, hash[:]) {
+			return domain.ErrAllocationConflict
+		}
+		return nil
+	}
+	if err != nil {
+		return fmt.Errorf("bind allocation identity: %w", err)
+	}
+	var existingID []byte
+	err = r.client.QueryRowContext(r.ctx, "allocation.check_legacy", `SELECT id FROM allocation_operations WHERE id = ? FOR UPDATE`, identity.Revision[:]).
+		Scan(&existingID)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil
+	}
+	if err != nil {
+		return fmt.Errorf("check existing allocation: %w", err)
+	}
+	return domain.ErrAllocationIdentityMissing
 }
 
 type allocationRequest struct {

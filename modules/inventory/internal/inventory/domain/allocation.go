@@ -7,9 +7,10 @@ import (
 )
 
 var (
-	ErrInvalidAllocation   = errors.New("invalid allocation")
-	ErrAllocationConflict  = errors.New("allocation request conflict")
-	ErrAllocationCancelled = errors.New("allocation cancelled")
+	ErrInvalidAllocation         = errors.New("invalid allocation")
+	ErrAllocationConflict        = errors.New("allocation request conflict")
+	ErrAllocationCancelled       = errors.New("allocation cancelled")
+	ErrAllocationIdentityMissing = errors.New("allocation identity missing")
 )
 
 type AllocationLine struct {
@@ -96,7 +97,17 @@ func DistributePartial(
 	return result, nil
 }
 
+type AllocationIdentity struct {
+	Revision       uuid.UUID
+	ActorID        uuid.UUID
+	PlanID         uuid.UUID
+	ItemID         uuid.UUID
+	ShoppingListID uuid.UUID
+	InventoryIDs   []uuid.UUID
+}
+
 type AllocationRepository interface {
+	BindIdentity(identity AllocationIdentity) error
 	Cancel(operationID uuid.UUID) (bool, error)
 	Allocate(
 		operationID uuid.UUID,
