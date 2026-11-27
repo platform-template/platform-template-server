@@ -3,7 +3,12 @@ package main
 import (
 	"context"
 	"errors"
+	"fmt"
 	"log/slog"
+	sessionapi "session/api/server/internalapi"
+
+	"google.golang.org/grpc"
+	"google.golang.org/grpc/credentials/insecure"
 
 	"github.com/urfave/cli/v3"
 	"golang.org/x/sync/errgroup"
@@ -48,7 +53,12 @@ func service(ctx context.Context, logger *slog.Logger, conf config.Env) (err err
 
 	dispatcherFactory := eventinfra.NewDispatcherFactory(appID, dispatcher)
 	svc := app.NewService(db.unit, dispatcherFactory)
-	httpServer, err := newHTTPServer(logger, conf, svc)
+	sessionConn, err := grpc.NewClient(conf.Session.Address, grpc.WithTransportCredentials(insecure.NewCredentials()))
+	if err != nil {
+		return fmt.Errorf("create session client: %w", err)
+	}
+	defer func() { err = errors.Join(err, sessionConn.Close()) }()
+	httpServer, err := newHTTPServer(logger, conf, svc, sessionapi.NewSessionServiceClient(sessionConn))
 	if err != nil {
 		return err
 	}

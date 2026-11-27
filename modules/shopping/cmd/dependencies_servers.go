@@ -2,6 +2,7 @@ package main
 
 import (
 	"log/slog"
+	sessionapi "session/api/server/internalapi"
 
 	gatewayapi "github.com/distributed-programming-2026/lib/gateway/interceptor"
 	grpcserver "google.golang.org/grpc"
@@ -18,8 +19,13 @@ import (
 	publichandler "shopping/internal/shopping/infra/handlers/public"
 )
 
-func newHTTPServer(logger *slog.Logger, conf config.Env, svc *app.Service) (*http.Server, error) {
-	register, err := publichandler.Register(svc, logger)
+func newHTTPServer(
+	logger *slog.Logger,
+	conf config.Env,
+	svc *app.Service,
+	sessions sessionapi.SessionServiceClient,
+) (*http.Server, error) {
+	register, err := publichandler.Register(svc, logger, sessions)
 	if err != nil {
 		return nil, err
 	}

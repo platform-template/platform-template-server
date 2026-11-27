@@ -4,6 +4,49 @@ info:
   title: Shopping service public API
   x-api-identifier: shoppingpublicapi
 paths:
+  /api/public/v1/shopping-lists:
+    get:
+      operationId: listLists
+      security: [{sessionCookie: []}]
+      responses:
+        '200':
+          description: Shopping lists
+          content:
+            application/json:
+              schema: {type: object, required: [lists], properties: {lists: {type: array, items: {$ref: '#/components/schemas/shoppingList'}}}}
+    post:
+      operationId: createList
+      security: [{sessionCookie: []}]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/listInput'}
+      responses:
+        '201': {description: Created, content: {application/json: {schema: {$ref: '#/components/schemas/shoppingList'}}}}
+        '400': {description: Invalid input}
+  /api/public/v1/shopping-lists/{id}:
+    parameters:
+      - {name: id, in: path, required: true, schema: {type: string}}
+    get:
+      operationId: getList
+      security: [{sessionCookie: []}]
+      responses:
+        '200': {description: List, content: {application/json: {schema: {$ref: '#/components/schemas/shoppingList'}}}}
+        '400': {description: Invalid identifier}
+        '404': {description: List not found}
+    patch:
+      operationId: renameList
+      security: [{sessionCookie: []}]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/listInput'}
+      responses:
+        '204': {description: Renamed}
+        '400': {description: Invalid input}
+        '404': {description: List not found}
   /api/public/v1/echo:
     post:
       operationId: echo
@@ -21,7 +64,17 @@ paths:
               schema:
                 $ref: "#/components/schemas/echoResponseData"
 components:
+  securitySchemes:
+    sessionCookie: {type: apiKey, in: cookie, name: session}
   schemas:
+    shoppingList:
+      type: object
+      required: [id, name]
+      properties: {id: {type: string}, name: {type: string}}
+    listInput:
+      type: object
+      required: [name]
+      properties: {name: {type: string, minLength: 1, maxLength: 255}}
     echoRequest:
       type: object
       properties:
