@@ -214,4 +214,5 @@ func testRecipeApplication(ctx context.Context, t *testing.T, client mysql.Trans
 		client.QueryRowContext(ctx, "test.events.count", `SELECT COUNT(*) FROM event_outbox`).Scan(&count),
 	)
 	require.Equal(t, 6, count)
+	testRecipeHTTP(t, service, first)
 }

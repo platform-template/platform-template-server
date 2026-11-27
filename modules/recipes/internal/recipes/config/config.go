@@ -13,6 +13,11 @@ type Env struct {
 	AMQP      AMQP      `envconfig:"amqp"`
 	Relay     Relay     `envconfig:"relay"`
 	Inventory Inventory `envconfig:"inventory"`
+	Session   Session   `envconfig:"session"`
+}
+
+type Session struct {
+	Address string `envconfig:"address" default:"session-service:8081"`
 }
 
 type Inventory struct {
@@ -76,7 +81,7 @@ func (c Env) Validate() error {
 		c.AMQP.Queue == "" ||
 		c.HTTP.Address == "" ||
 		c.GRPC.Address == "" ||
-		c.Inventory.Address == "" {
+		c.Inventory.Address == "" || c.Session.Address == "" {
 		return errors.New("database, broker and server configuration must not be empty")
 	}
 	return nil

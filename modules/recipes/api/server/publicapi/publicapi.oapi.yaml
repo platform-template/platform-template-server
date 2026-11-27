@@ -4,6 +4,99 @@ info:
   title: Recipes service public API
   x-api-identifier: recipespublicapi
 paths:
+  /api/public/v1/recipes:
+    get:
+      operationId: listRecipes
+      security:
+        - sessionCookie: []
+      parameters:
+        - {name: search, in: query, schema: {type: string}}
+        - {name: limit, in: query, schema: {type: integer, minimum: 1, maximum: 100}}
+        - {name: offset, in: query, schema: {type: integer, minimum: 0}}
+      responses:
+        '200':
+          description: Recipes
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [recipes]
+                properties:
+                  recipes: {type: array, items: {$ref: '#/components/schemas/recipe'}}
+    post:
+      operationId: createRecipe
+      security:
+        - sessionCookie: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/recipeInput'}
+      responses:
+        '201':
+          description: Created
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/recipe'}
+        '400': {description: Invalid recipe}
+        '503': {description: Inventory unavailable}
+  /api/public/v1/recipes/{id}:
+    parameters:
+      - {name: id, in: path, required: true, schema: {type: string}}
+    get:
+      operationId: getRecipe
+      security:
+        - sessionCookie: []
+      responses:
+        '200':
+          description: Recipe
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/recipe'}
+        '400': {description: Invalid ID}
+        '404': {description: Not found}
+    put:
+      operationId: reviseRecipe
+      security:
+        - sessionCookie: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/recipeInput'}
+      responses:
+        '204': {description: Updated}
+        '400': {description: Invalid recipe}
+        '404': {description: Not found}
+        '503': {description: Inventory unavailable}
+    delete:
+      operationId: archiveRecipe
+      security:
+        - sessionCookie: []
+      responses:
+        '204': {description: Archived}
+        '400': {description: Invalid ID}
+        '404': {description: Not found}
+  /api/public/v1/recipes/{id}/ingredients:
+    parameters:
+      - {name: id, in: path, required: true, schema: {type: string}}
+      - {name: servings, in: query, required: true, schema: {type: integer, format: int64, minimum: 1}}
+    get:
+      operationId: scaleIngredients
+      security:
+        - sessionCookie: []
+      responses:
+        '200':
+          description: Scaled ingredients
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [ingredients]
+                properties:
+                  ingredients: {type: array, items: {$ref: '#/components/schemas/ingredient'}}
+        '400': {description: Invalid request}
+        '404': {description: Not found}
   /api/public/v1/echo:
     post:
       operationId: echo
@@ -21,7 +114,31 @@ paths:
               schema:
                 $ref: "#/components/schemas/echoResponseData"
 components:
+  securitySchemes:
+    sessionCookie: {type: apiKey, in: cookie, name: session}
   schemas:
+    ingredient:
+      type: object
+      required: [productId, quantity]
+      properties:
+        productId: {type: string}
+        quantity: {type: integer, format: int64, minimum: 1}
+    recipeInput:
+      type: object
+      required: [name, description, instructions, servings, ingredients]
+      properties:
+        name: {type: string, minLength: 1}
+        description: {type: string}
+        instructions: {type: string}
+        servings: {type: integer, format: int64, minimum: 1}
+        ingredients: {type: array, minItems: 1, items: {$ref: '#/components/schemas/ingredient'}}
+    recipe:
+      allOf:
+        - $ref: '#/components/schemas/recipeInput'
+        - type: object
+          required: [id]
+          properties:
+            id: {type: string}
     echoRequest:
       type: object
       properties:

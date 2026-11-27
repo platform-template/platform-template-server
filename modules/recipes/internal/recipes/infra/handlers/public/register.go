@@ -1,8 +1,17 @@
 package public
 
 import (
+	"context"
 	"log/slog"
 	"net/http"
+	"net/url"
+	sessionapi "session/api/server/internalapi"
+	"strings"
+	"time"
+	"uuid"
+
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 
 	publicapi "recipes/api/server/publicapi"
 	"recipes/internal/recipes/app"
@@ -15,7 +24,11 @@ import (
 	runtimehttp "github.com/distributed-programming-2026/lib/runtime/http"
 )
 
-func Register(svc *app.Service, logger *slog.Logger) (runtimehttp.RegisterFunc, error) {
+func Register(
+	svc *app.Service,
+	logger *slog.Logger,
+	sessions sessionapi.SessionServiceClient,
+) (runtimehttp.RegisterFunc, error) {
 	spec, err := publicapi.GetSwagger()
 	if err != nil {
 		return nil, err
@@ -26,6 +39,7 @@ func Register(svc *app.Service, logger *slog.Logger) (runtimehttp.RegisterFunc, 
 	}
 	return func(router chi.Router) error {
 		router.Group(func(router chi.Router) {
+			router.Use(authenticateRecipes(sessions))
 			router.Use(func(next http.Handler) http.Handler {
 				return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 					route, params, err := validatorRouter.FindRoute(r)
@@ -34,6 +48,9 @@ func Register(svc *app.Service, logger *slog.Logger) (runtimehttp.RegisterFunc, 
 							Request:    r,
 							PathParams: params,
 							Route:      route,
+							Options: &openapi3filter.Options{
+								AuthenticationFunc: openapi3filter.NoopAuthenticationFunc,
+							},
 						})
 					}
 					if err != nil {
@@ -53,4 +70,47 @@ func Register(svc *app.Service, logger *slog.Logger) (runtimehttp.RegisterFunc, 
 		})
 		return nil
 	}, nil
+}
+
+type userIDKey struct{}
+
+func authenticateRecipes(sessions sessionapi.SessionServiceClient) func(http.Handler) http.Handler {
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			base := "/api/public/v1/recipes"
+			if r.URL.Path != base && !strings.HasPrefix(r.URL.Path, base+"/") {
+				next.ServeHTTP(w, r)
+				return
+			}
+			cookie, err := r.Cookie("session")
+			if err != nil || cookie.Value == "" {
+				http.Error(w, "unauthorized", http.StatusUnauthorized)
+				return
+			}
+			ctx, cancel := context.WithTimeout(r.Context(), 3*time.Second)
+			defer cancel()
+			resolved, err := sessions.ResolveSession(ctx, &sessionapi.ResolveSessionRequest{Token: cookie.Value})
+			if status.Code(err) == codes.Unauthenticated || status.Code(err) == codes.InvalidArgument {
+				http.Error(w, "unauthorized", http.StatusUnauthorized)
+				return
+			}
+			if err != nil || resolved == nil {
+				http.Error(w, "authentication unavailable", http.StatusServiceUnavailable)
+				return
+			}
+			userID, err := uuid.Parse(resolved.GetUserId())
+			if err != nil || userID == uuid.Nil() {
+				http.Error(w, "authentication unavailable", http.StatusServiceUnavailable)
+				return
+			}
+			if r.Method != http.MethodGet && r.Header.Get("Origin") != "" {
+				origin, err := url.Parse(r.Header.Get("Origin"))
+				if err != nil || origin.Host != r.Host || (origin.Scheme != "https" && origin.Scheme != "http") {
+					http.Error(w, "forbidden", http.StatusForbidden)
+					return
+				}
+			}
+			next.ServeHTTP(w, r.WithContext(context.WithValue(r.Context(), userIDKey{}, userID)))
+		})
+	}
 }

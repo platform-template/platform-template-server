@@ -16,6 +16,7 @@ import (
 	"recipes/internal/recipes/config"
 	eventinfra "recipes/internal/recipes/infra/event"
 	"recipes/internal/recipes/infra/grpc/catalog"
+	sessionapi "session/api/server/internalapi"
 )
 
 func (a *application) serviceCmd() *cli.Command {
@@ -65,7 +66,15 @@ func service(ctx context.Context, logger *slog.Logger, conf config.Env) (err err
 		dispatcherFactory,
 		catalog.NewClient(inventoryapi.NewInventoryServiceClient(inventoryConn)),
 	)
-	httpServer, err := newHTTPServer(logger, conf, svc)
+	sessionConn, err := grpcclient.NewClient(
+		conf.Session.Address,
+		grpcclient.WithTransportCredentials(insecure.NewCredentials()),
+	)
+	if err != nil {
+		return fmt.Errorf("create session client: %w", err)
+	}
+	defer func() { err = errors.Join(err, sessionConn.Close()) }()
+	httpServer, err := newHTTPServer(logger, conf, svc, sessionapi.NewSessionServiceClient(sessionConn))
 	if err != nil {
 		return err
 	}
