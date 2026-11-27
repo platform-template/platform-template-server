@@ -47,10 +47,13 @@ type MySQL struct {
 }
 
 type AMQP struct {
-	URL            string        `envconfig:"url"             default:"amqp://local:local@localhost:5672/"`
-	Queue          string        `envconfig:"queue"           default:"inventory.echo"`
-	ConnectTimeout time.Duration `envconfig:"connect_timeout" default:"5s"`
-	PrefetchCount  int           `envconfig:"prefetch_count"  default:"10"`
+	MealPlannerQueue string        `envconfig:"mealplanner_queue" default:"mealplanner.echo"`
+	ShoppingQueue    string        `envconfig:"shopping_queue"    default:"shopping.echo"`
+	AuditQueue       string        `envconfig:"audit_queue"       default:"audit.echo"`
+	URL              string        `envconfig:"url"               default:"amqp://local:local@localhost:5672/"`
+	Queue            string        `envconfig:"queue"             default:"inventory.echo"`
+	ConnectTimeout   time.Duration `envconfig:"connect_timeout"   default:"5s"`
+	PrefetchCount    int           `envconfig:"prefetch_count"    default:"10"`
 }
 
 type Relay struct {
@@ -72,6 +75,9 @@ func (c Env) Validate() error {
 	}
 	if c.MySQL.MaxConnections <= 0 || c.AMQP.PrefetchCount <= 0 || c.Relay.BatchSize <= 0 {
 		return errors.New("connection, prefetch and batch counts must be positive")
+	}
+	if c.AMQP.MealPlannerQueue == "" || c.AMQP.ShoppingQueue == "" || c.AMQP.AuditQueue == "" {
+		return errors.New("subscriber queue names must not be empty")
 	}
 	if c.MySQL.Address == "" || c.MySQL.Database == "" || c.MySQL.User == "" || c.AMQP.URL == "" ||
 		c.AMQP.Queue == "" ||
