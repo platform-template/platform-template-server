@@ -121,29 +121,29 @@ func (r *reservationRepository) insert(inventoryID, id uuid.UUID, status domain.
 	return true, nil
 }
 
-func (r *reservationRepository) Reserve(reservation *domain.Reservation) error {
+func (r *reservationRepository) Reserve(reservation *domain.Reservation) (bool, error) {
 	if reservation == nil || reservation.Status() != domain.ReservationActive {
-		return domain.ErrInvalidReservation
+		return false, domain.ErrInvalidReservation
 	}
 	id := reservation.ID()
 	created, err := r.insert(reservation.InventoryID(), id, domain.ReservationActive)
 	if err != nil {
-		return err
+		return false, err
 	}
 	if !created {
-		return r.checkExisting(reservation)
+		return false, r.checkExisting(reservation)
 	}
 	for _, item := range reservation.Items() {
 		stock, err := getStock(r.ctx, r.client, reservation.InventoryID(), item.ProductID, true)
 		if err != nil {
-			return err
+			return false, err
 		}
 		if stock == nil {
-			return domain.ErrInsufficientStock
+			return false, domain.ErrInsufficientStock
 		}
 		updated, err := stock.Reserve(item.Quantity)
 		if err != nil {
-			return err
+			return false, err
 		}
 		_, err = r.client.ExecContext(
 			r.ctx,
@@ -154,7 +154,7 @@ func (r *reservationRepository) Reserve(reservation *domain.Reservation) error {
 			item.ProductID[:],
 		)
 		if err != nil {
-			return fmt.Errorf("reserve stock: %w", err)
+			return false, fmt.Errorf("reserve stock: %w", err)
 		}
 		_, err = r.client.ExecContext(
 			r.ctx,
@@ -165,10 +165,10 @@ func (r *reservationRepository) Reserve(reservation *domain.Reservation) error {
 			item.Quantity,
 		)
 		if err != nil {
-			return fmt.Errorf("insert reservation item: %w", err)
+			return false, fmt.Errorf("insert reservation item: %w", err)
 		}
 	}
-	return nil
+	return true, nil
 }
 
 func (r *reservationRepository) checkExisting(requested *domain.Reservation) error {
@@ -194,45 +194,45 @@ func (r *reservationRepository) checkExisting(requested *domain.Reservation) err
 	return nil
 }
 
-func (r *reservationRepository) Release(inventoryID, id uuid.UUID) error {
+func (r *reservationRepository) Release(inventoryID, id uuid.UUID) (bool, error) {
 	if id == uuid.Nil() || inventoryID == uuid.Nil() {
-		return domain.ErrInvalidReservation
+		return false, domain.ErrInvalidReservation
 	}
 	created, err := r.insert(inventoryID, id, domain.ReservationCancelled)
 	if err != nil {
-		return err
+		return false, err
 	}
 	if created {
-		return nil
+		return true, nil
 	}
 	reservation, err := r.get(id, true)
 	if err != nil {
-		return err
+		return false, err
 	}
 	if reservation == nil {
-		return errors.New("reservation disappeared")
+		return false, errors.New("reservation disappeared")
 	}
 	if reservation.InventoryID() != inventoryID {
-		return domain.ErrReservationConflict
+		return false, domain.ErrReservationConflict
 	}
 	changed, err := reservation.Cancel()
 	if err != nil {
-		return err
+		return false, err
 	}
 	if !changed {
-		return nil
+		return false, nil
 	}
 	for _, item := range reservation.Items() {
 		stock, err := getStock(r.ctx, r.client, reservation.InventoryID(), item.ProductID, true)
 		if err != nil {
-			return err
+			return false, err
 		}
 		if stock == nil {
-			return domain.ErrProductNotFound
+			return false, domain.ErrProductNotFound
 		}
 		updated, err := stock.Release(item.Quantity)
 		if err != nil {
-			return err
+			return false, err
 		}
 		_, err = r.client.ExecContext(
 			r.ctx,
@@ -243,7 +243,7 @@ func (r *reservationRepository) Release(inventoryID, id uuid.UUID) error {
 			item.ProductID[:],
 		)
 		if err != nil {
-			return fmt.Errorf("release stock: %w", err)
+			return false, fmt.Errorf("release stock: %w", err)
 		}
 	}
 	_, err = r.client.ExecContext(
@@ -254,57 +254,57 @@ func (r *reservationRepository) Release(inventoryID, id uuid.UUID) error {
 		id[:],
 	)
 	if err != nil {
-		return fmt.Errorf("cancel reservation: %w", err)
+		return false, fmt.Errorf("cancel reservation: %w", err)
 	}
-	return nil
+	return true, nil
 }
 
-func (r *reservationRepository) Consume(inventoryID, id uuid.UUID) error {
+func (r *reservationRepository) Consume(inventoryID, id uuid.UUID) (bool, error) {
 	if id == uuid.Nil() || inventoryID == uuid.Nil() {
-		return domain.ErrInvalidReservation
+		return false, domain.ErrInvalidReservation
 	}
 	reservation, err := r.get(id, true)
 	if err != nil {
-		return err
+		return false, err
 	}
 	if reservation == nil {
-		return domain.ErrReservationNotFound
+		return false, domain.ErrReservationNotFound
 	}
 	if reservation.InventoryID() != inventoryID {
-		return domain.ErrReservationConflict
+		return false, domain.ErrReservationConflict
 	}
 	changed, err := reservation.Consume()
 	if err != nil {
-		return err
+		return false, err
 	}
 	if !changed {
-		return nil
+		return false, nil
 	}
 	for _, item := range reservation.Items() {
 		stock, err := getStock(r.ctx, r.client, reservation.InventoryID(), item.ProductID, true)
 		if err != nil {
-			return err
+			return false, err
 		}
 		if stock == nil {
-			return domain.ErrProductNotFound
+			return false, domain.ErrProductNotFound
 		}
 		updated, err := stock.Consume(item.Quantity)
 		if err != nil {
-			return err
+			return false, err
 		}
 		_, err = r.client.ExecContext(r.ctx, "stock.consume",
 			`UPDATE stocks SET quantity = ?, reserved_quantity = ? WHERE inventory_id = ? AND product_id = ?`,
 			updated.Quantity, updated.ReservedQuantity, inventoryIDBytes(reservation), item.ProductID[:])
 		if err != nil {
-			return fmt.Errorf("consume stock: %w", err)
+			return false, fmt.Errorf("consume stock: %w", err)
 		}
 	}
 	_, err = r.client.ExecContext(r.ctx, "reservation.consume",
 		`UPDATE reservations SET status = ? WHERE id = ?`, string(domain.ReservationConsumed), id[:])
 	if err != nil {
-		return fmt.Errorf("consume reservation: %w", err)
+		return false, fmt.Errorf("consume reservation: %w", err)
 	}
-	return nil
+	return true, nil
 }
 
 func inventoryIDBytes(reservation *domain.Reservation) []byte {

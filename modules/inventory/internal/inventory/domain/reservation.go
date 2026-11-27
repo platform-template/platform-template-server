@@ -118,7 +118,9 @@ func (reservation *Reservation) Matches(other *Reservation) bool {
 
 type ReservationRepository interface {
 	GetByID(inventoryID, id uuid.UUID) (*Reservation, error)
-	Reserve(*Reservation) error
-	Release(inventoryID, id uuid.UUID) error
-	Consume(inventoryID, id uuid.UUID) error
+	// Mutations report whether they created a reservation or changed its state.
+	// Creating a cancellation marker counts as a change.
+	Reserve(*Reservation) (bool, error)
+	Release(inventoryID, id uuid.UUID) (bool, error)
+	Consume(inventoryID, id uuid.UUID) (bool, error)
 }

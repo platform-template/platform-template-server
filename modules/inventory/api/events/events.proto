@@ -45,3 +45,27 @@ message StockAdjusted {
   int64 quantity_delta = 3;
   string actor_id = 4;
 }
+
+message ReservationLine {
+  string product_id = 1;
+  int64 quantity = 2;
+}
+
+message ReservationCreated {
+  string inventory_id = 1;
+  string reservation_id = 2;
+  repeated ReservationLine items = 3;
+  string actor_id = 4;
+}
+
+message ReservationCancelled {
+  string inventory_id = 1;
+  string reservation_id = 2;
+  string actor_id = 3;
+}
+
+message ReservationConsumed {
+  string inventory_id = 1;
+  string reservation_id = 2;
+  string actor_id = 3;
+}

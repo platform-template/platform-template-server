@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 	"uuid"
@@ -39,6 +40,7 @@ import (
 	publichandler "inventory/internal/inventory/infra/handlers/public"
 	inventorymysql "inventory/internal/inventory/infra/mysql"
 	"inventory/internal/inventory/infra/mysql/migrations"
+	"inventory/internal/inventory/infra/mysql/repository"
 	sessionapi "session/api/server/internalapi"
 )
 
@@ -117,8 +119,12 @@ func TestMultipleInventoryMigrationAndReservations(t *testing.T) {
 		other, err := p.Stock(c).GetByProductID(otherID, productID)
 		require.NoError(t, err)
 		require.EqualValues(t, 20, other.Quantity)
-		require.ErrorIs(t, p.Reservation(c).Consume(otherID, reservationID), domain.ErrReservationConflict)
-		return p.Reservation(c).Consume(legacyID, reservationID)
+		require.ErrorIs(
+			t,
+			ignoreTransition(p.Reservation(c).Consume(otherID, reservationID)),
+			domain.ErrReservationConflict,
+		)
+		return ignoreTransition(p.Reservation(c).Consume(legacyID, reservationID))
 	}))
 	require.NoError(t, execute(func(p *inventorymysql.RepositoryProvider, c context.Context) error {
 		legacy, err := p.Stock(c).GetByProductID(legacyID, productID)
@@ -128,7 +134,7 @@ func TestMultipleInventoryMigrationAndReservations(t *testing.T) {
 		other, err := p.Stock(c).GetByProductID(otherID, productID)
 		require.NoError(t, err)
 		require.EqualValues(t, 20, other.Quantity)
-		return p.Reservation(c).Consume(legacyID, reservationID)
+		return ignoreTransition(p.Reservation(c).Consume(legacyID, reservationID))
 	}))
 	require.NoError(t, execute(func(p *inventorymysql.RepositoryProvider, c context.Context) error {
 		product, err := domain.NewProduct(uuid.New(), "молоко", domain.UnitMillilitres)
@@ -153,10 +159,10 @@ func TestMultipleInventoryMigrationAndReservations(t *testing.T) {
 		if err != nil {
 			return err
 		}
-		if err := p.Reservation(c).Reserve(reservation); err != nil {
+		if err := ignoreTransition(p.Reservation(c).Reserve(reservation)); err != nil {
 			return err
 		}
-		require.NoError(t, p.Reservation(c).Reserve(reservation))
+		require.NoError(t, ignoreTransition(p.Reservation(c).Reserve(reservation)))
 		require.ErrorIs(t, p.Stock(c).Remove(otherID, product.ID(), 3), domain.ErrInsufficientStock)
 		conflict, err := domain.NewReservation(
 			id,
@@ -164,14 +170,14 @@ func TestMultipleInventoryMigrationAndReservations(t *testing.T) {
 			[]domain.ReservationItem{{ProductID: product.ID(), Quantity: 5}},
 		)
 		require.NoError(t, err)
-		require.ErrorIs(t, p.Reservation(c).Reserve(conflict), domain.ErrReservationConflict)
-		if err := p.Reservation(c).Release(otherID, id); err != nil {
+		require.ErrorIs(t, ignoreTransition(p.Reservation(c).Reserve(conflict)), domain.ErrReservationConflict)
+		if err := ignoreTransition(p.Reservation(c).Release(otherID, id)); err != nil {
 			return err
 		}
-		require.ErrorIs(t, p.Reservation(c).Reserve(conflict), domain.ErrReservationConflict)
-		require.ErrorIs(t, p.Reservation(c).Reserve(reservation), domain.ErrReservationCancelled)
+		require.ErrorIs(t, ignoreTransition(p.Reservation(c).Reserve(conflict)), domain.ErrReservationConflict)
+		require.ErrorIs(t, ignoreTransition(p.Reservation(c).Reserve(reservation)), domain.ErrReservationCancelled)
 		markerID := uuid.New()
-		if err := p.Reservation(c).Release(otherID, markerID); err != nil {
+		if err := ignoreTransition(p.Reservation(c).Release(otherID, markerID)); err != nil {
 			return err
 		}
 		marker, err := domain.NewReservation(
@@ -180,7 +186,7 @@ func TestMultipleInventoryMigrationAndReservations(t *testing.T) {
 			[]domain.ReservationItem{{ProductID: product.ID(), Quantity: 1}},
 		)
 		require.NoError(t, err)
-		require.ErrorIs(t, p.Reservation(c).Reserve(marker), domain.ErrReservationCancelled)
+		require.ErrorIs(t, ignoreTransition(p.Reservation(c).Reserve(marker)), domain.ErrReservationCancelled)
 		return nil
 	}))
 	missingID, failedReservationID := productID, uuid.New()
@@ -205,7 +211,7 @@ func TestMultipleInventoryMigrationAndReservations(t *testing.T) {
 		if err != nil {
 			return err
 		}
-		return p.Reservation(c).Reserve(reservation)
+		return ignoreTransition(p.Reservation(c).Reserve(reservation))
 	}), domain.ErrInsufficientStock)
 	require.NoError(t, execute(func(p *inventorymysql.RepositoryProvider, c context.Context) error {
 		stock, err := p.Stock(c).GetByProductID(otherID, productID)
@@ -359,6 +365,89 @@ func TestMultipleInventoryMigrationAndReservations(t *testing.T) {
 	require.False(t, isOwner)
 
 	testPublicHTTP(t, service, client, ownerID, strangerID, legacyID, owned.ID(), productID)
+	testReservationEvents(t, service, client, otherID, productID)
+}
+
+func testReservationEvents(
+	t *testing.T,
+	service *app.Service,
+	client mysql.TransactionalClient,
+	inventoryID, productID uuid.UUID,
+) {
+	t.Helper()
+	id, markerID := uuid.New(), uuid.New()
+	items := []domain.ReservationItem{{ProductID: productID, Quantity: 1}}
+	unit := uow.NewUnitOfWork(mysql.NewConnectionPool(client), inventorymysql.NewRepositoryProvider)
+	failure := errors.New("outbox unavailable")
+	failingService := app.NewService(unit, failingDispatcherFactory{err: failure})
+	failedID := uuid.New()
+	before, err := service.GetStock(t.Context(), inventoryID, productID)
+	require.NoError(t, err)
+	require.ErrorIs(t, failingService.Reserve(t.Context(), inventoryID, failedID, items), failure)
+	reservation, err := repository.NewReservationRepository(t.Context(), client).GetByID(inventoryID, failedID)
+	require.NoError(t, err)
+	require.Nil(t, reservation)
+	after, err := service.GetStock(t.Context(), inventoryID, productID)
+	require.NoError(t, err)
+	require.Equal(t, before.ReservedQuantity, after.ReservedQuantity)
+	results := make(chan error, 2)
+	var group sync.WaitGroup
+	for range 2 {
+		group.Add(1)
+		go func() {
+			defer group.Done()
+			ctx, cancel := context.WithCancel(context.Background())
+			defer cancel()
+			results <- service.Reserve(ctx, inventoryID, id, items)
+		}()
+	}
+	group.Wait()
+	close(results)
+	for err := range results {
+		require.NoError(t, err)
+	}
+	require.NoError(t, service.Consume(t.Context(), inventoryID, id))
+	require.NoError(t, service.Consume(t.Context(), inventoryID, id))
+	require.NoError(t, service.Release(t.Context(), inventoryID, markerID))
+	require.NoError(t, service.Release(t.Context(), inventoryID, markerID))
+	rows, err := client.QueryContext(t.Context(), "test.outbox.events", `SELECT payload FROM event_outbox`)
+	require.NoError(t, err)
+	defer rows.Close()
+	counts := make(map[string]int)
+	for rows.Next() {
+		var payload []byte
+		require.NoError(t, rows.Scan(&payload))
+		envelope, err := event.Unmarshal(payload)
+		require.NoError(t, err)
+		switch envelope.Type() {
+		case "ReservationCreated":
+			var item inventoryevents.ReservationCreated
+			require.NoError(t, envelope.UnmarshalPayload(&item))
+			if item.ReservationId == id.String() {
+				counts[envelope.Type()]++
+				require.Len(t, item.Items, 1)
+				require.Equal(t, productID.String(), item.Items[0].ProductId)
+			}
+		case "ReservationConsumed":
+			var item inventoryevents.ReservationConsumed
+			require.NoError(t, envelope.UnmarshalPayload(&item))
+			if item.ReservationId == id.String() {
+				counts[envelope.Type()]++
+			}
+		case "ReservationCancelled":
+			var item inventoryevents.ReservationCancelled
+			require.NoError(t, envelope.UnmarshalPayload(&item))
+			if item.ReservationId == markerID.String() {
+				counts[envelope.Type()]++
+			}
+		}
+	}
+	require.NoError(t, rows.Err())
+	require.Equal(
+		t,
+		map[string]int{"ReservationCreated": 1, "ReservationConsumed": 1, "ReservationCancelled": 1},
+		counts,
+	)
 }
 
 type failingDispatcherFactory struct{ err error }
@@ -512,3 +601,5 @@ func TestCleanMigrationDoesNotCreateDefaultInventory(t *testing.T) {
 	require.NoError(t, client.QueryRowContext(ctx, "inventory.count", `SELECT COUNT(*) FROM inventories`).Scan(&count))
 	require.Zero(t, count)
 }
+
+func ignoreTransition(_ bool, err error) error { return err }

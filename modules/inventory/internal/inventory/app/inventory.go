@@ -309,7 +309,20 @@ func (s *Service) Reserve(ctx context.Context, inventoryID, id uuid.UUID, items 
 		if err := requireInventory(ctx, p, inventoryID); err != nil {
 			return err
 		}
-		return p.Reservation(ctx).Reserve(reservation)
+		created, err := p.Reservation(ctx).Reserve(reservation)
+		if err != nil || !created {
+			return err
+		}
+		lines := make([]*inventoryevents.ReservationLine, 0, len(items))
+		for _, item := range reservation.Items() {
+			lines = append(
+				lines,
+				&inventoryevents.ReservationLine{ProductId: item.ProductID.String(), Quantity: item.Quantity},
+			)
+		}
+		return s.dispatch(ctx, &inventoryevents.ReservationCreated{
+			InventoryId: inventoryID.String(), ReservationId: id.String(), Items: lines, ActorId: actorID(ctx),
+		})
 	})
 	if err != nil {
 		return fmt.Errorf("reserve: %w", err)
@@ -322,7 +335,13 @@ func (s *Service) Release(ctx context.Context, inventoryID, id uuid.UUID) error 
 		if err := requireInventory(ctx, p, inventoryID); err != nil {
 			return err
 		}
-		return p.Reservation(ctx).Release(inventoryID, id)
+		changed, err := p.Reservation(ctx).Release(inventoryID, id)
+		if err != nil || !changed {
+			return err
+		}
+		return s.dispatch(ctx, &inventoryevents.ReservationCancelled{
+			InventoryId: inventoryID.String(), ReservationId: id.String(), ActorId: actorID(ctx),
+		})
 	})
 	if err != nil {
 		return fmt.Errorf("release: %w", err)
@@ -335,7 +354,13 @@ func (s *Service) Consume(ctx context.Context, inventoryID, id uuid.UUID) error 
 		if err := requireInventory(ctx, p, inventoryID); err != nil {
 			return err
 		}
-		return p.Reservation(ctx).Consume(inventoryID, id)
+		changed, err := p.Reservation(ctx).Consume(inventoryID, id)
+		if err != nil || !changed {
+			return err
+		}
+		return s.dispatch(ctx, &inventoryevents.ReservationConsumed{
+			InventoryId: inventoryID.String(), ReservationId: id.String(), ActorId: actorID(ctx),
+		})
 	})
 	if err != nil {
 		return fmt.Errorf("consume: %w", err)
