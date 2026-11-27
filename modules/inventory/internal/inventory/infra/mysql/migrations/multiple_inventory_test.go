@@ -16,6 +16,7 @@ import (
 	"uuid"
 
 	"github.com/distributed-programming-2026/go-sdk/pkg/event"
+	"github.com/distributed-programming-2026/go-sdk/pkg/event/inbox"
 	"github.com/distributed-programming-2026/go-sdk/pkg/event/outbox"
 	"github.com/distributed-programming-2026/go-sdk/pkg/migrator"
 	"github.com/distributed-programming-2026/go-sdk/pkg/mysql"
@@ -83,6 +84,7 @@ func TestMultipleInventoryMigrationAndReservations(t *testing.T) {
 	require.NoError(t, err)
 	require.NoError(t, runner.Migrate(ctx, "inventory", all...))
 	require.NoError(t, runner.Migrate(ctx, "event-outbox", outbox.Migrations(client)...))
+	require.NoError(t, runner.Migrate(ctx, "event-inbox", inbox.Migrations(client)...))
 	// MySQL DDL is not transactional; an interrupted migration must be safe to retry.
 	require.NoError(t, all[3].Up(ctx))
 
@@ -390,6 +392,7 @@ func TestMultipleInventoryMigrationAndReservations(t *testing.T) {
 	testPublicHTTP(t, service, client, ownerID, strangerID, legacyID, owned.ID(), productID)
 	testReservationEvents(t, service, client, otherID, productID)
 	testPartialAllocation(t, service, unit)
+	testMealInbox(t, service, unit, client)
 }
 
 func testReservationEvents(

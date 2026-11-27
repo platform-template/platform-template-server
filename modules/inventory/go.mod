@@ -24,6 +24,7 @@ require (
 	golang.org/x/sync v0.22.0
 	google.golang.org/grpc v1.84.0
 	google.golang.org/protobuf v1.36.12
+	mealplanner v0.0.0
 	session v0.0.0
 )
 
@@ -96,3 +97,5 @@ replace authz => ../authz
 replace session => ../session
 
 replace audit => ../audit
+
+replace mealplanner => ../mealplanner

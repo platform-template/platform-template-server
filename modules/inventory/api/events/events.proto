@@ -69,3 +69,16 @@ message ReservationConsumed {
   string reservation_id = 2;
   string actor_id = 3;
 }
+
+
+message AllocationLine { string inventory_id = 1; string reservation_id = 2; string product_id = 3; int64 quantity = 4; }
+message AllocationCompleted {
+ string plan_id = 1;
+ string item_id = 2;
+ string revision = 3;
+ string actor_id = 4;
+ string shopping_list_id = 5;
+ repeated AllocationLine allocations = 6;
+ repeated ReservationLine shortages = 7;
+ uint64 result_version = 8;
+}

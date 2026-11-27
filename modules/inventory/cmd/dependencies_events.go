@@ -6,13 +6,14 @@ import (
 	"github.com/distributed-programming-2026/go-sdk/pkg/amqp"
 	"github.com/distributed-programming-2026/go-sdk/pkg/event"
 	eventamqp "github.com/distributed-programming-2026/go-sdk/pkg/event/amqp"
-	"github.com/distributed-programming-2026/go-sdk/pkg/event/inbox"
 	"github.com/distributed-programming-2026/go-sdk/pkg/event/outbox"
 	"github.com/distributed-programming-2026/go-sdk/pkg/uow"
 
 	domainevent "github.com/distributed-programming-2026/lib/event"
 
+	"inventory/internal/inventory/app"
 	"inventory/internal/inventory/config"
+	eventinfra "inventory/internal/inventory/infra/event"
 	eventhandler "inventory/internal/inventory/infra/handlers/events"
 )
 
@@ -40,10 +41,14 @@ func newDispatcher(
 	)
 }
 
-func newMessageHandler(logger *slog.Logger, conf config.Env, db *database) (amqp.Handler, error) {
-	handler, _, err := inbox.Decorate(eventhandler.NewHandler(logger), db.unit, inbox.Config{
-		Consumer: conf.AMQP.Queue,
-	})
+func newMessageHandler(
+	logger *slog.Logger,
+	conf config.Env,
+	db *database,
+	dispatcher event.Dispatcher,
+) (amqp.Handler, error) {
+	svc := app.NewService(db.unit, eventinfra.NewDispatcherFactory(appID, dispatcher))
+	handler, err := eventhandler.WithInbox(eventhandler.NewHandler(logger, svc), db.unit, conf.AMQP.Queue)
 	if err != nil {
 		return nil, err
 	}
