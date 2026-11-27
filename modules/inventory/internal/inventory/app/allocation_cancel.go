@@ -57,7 +57,7 @@ func (s *Service) CancelMealAllocation(ctx context.Context, identity domain.Allo
 				&auditevents.AuditRecordRequested{
 					ActorId:      identity.ActorID.String(),
 					Action:       "allocation.cancelled",
-					TargetType:   "meal_item",
+					TargetType:   auditMealItemTarget,
 					TargetId:     identity.ItemID.String(),
 					MetadataJson: metadata,
 				},

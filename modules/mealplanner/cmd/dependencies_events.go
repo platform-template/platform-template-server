@@ -28,6 +28,7 @@ func newDispatcher(
 		conf.AMQP.InventoryQueue,
 		"mealplanner.MealPlanningRequested",
 		"mealplanner.MealCancellationRequested",
+		"mealplanner.MealCompletionRequested",
 	)
 	domainevent.DeclareSubscriber(connection, conf.AMQP.ShoppingQueue, "mealplanner.MealCancellationRequested")
 	domainevent.DeclareSubscriber(connection, conf.AMQP.AuditQueue, "*.AuditRecordRequested")

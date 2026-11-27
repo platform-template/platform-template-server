@@ -244,4 +244,32 @@ func testMealInbox(
 	released, err = service.GetStock(ctx, inventory.ID(), product.ID())
 	require.NoError(t, err)
 	require.Zero(t, released.ReservedQuantity)
+
+	completed := identity
+	completed.Revision = uuid.New()
+	completeRequest := &mealplannerevents.MealPlanningRequested{
+		PlanId: completed.PlanID.String(), ItemId: completed.ItemID.String(), Revision: completed.Revision.String(),
+		ActorId: completed.ActorID.String(), ShoppingListId: completed.ShoppingListID.String(),
+		InventoryIds: []string{inventory.ID().String()},
+		Ingredients:  []*mealplannerevents.MealIngredient{{ProductId: product.ID().String(), Quantity: 2}},
+	}
+	allocation, err := event.New(ctx, "mealplanner", "MealPlanningRequested", completeRequest)
+	require.NoError(t, err)
+	require.NoError(t, wrapped.Handle(ctx, allocation))
+	var outboxBefore, outboxAfter int
+	require.NoError(t, client.QueryRowContext(ctx, "test.outbox.count", `SELECT COUNT(*) FROM event_outbox`).Scan(&outboxBefore))
+	completion, err := event.New(ctx, "mealplanner", "MealCompletionRequested", &mealplannerevents.MealCompletionRequested{
+		PlanId: completed.PlanID.String(), ItemId: completed.ItemID.String(), Revision: completed.Revision.String(),
+		ActorId: completed.ActorID.String(), ShoppingListId: completed.ShoppingListID.String(), InventoryIds: completeRequest.InventoryIds,
+	})
+	require.NoError(t, err)
+	require.NoError(t, wrapped.Handle(ctx, completion))
+	require.NoError(t, wrapped.Handle(ctx, completion))
+	consumed, err := service.GetStock(ctx, inventory.ID(), product.ID())
+	require.NoError(t, err)
+	require.Zero(t, consumed.ReservedQuantity)
+	require.EqualValues(t, 1, consumed.Quantity)
+	require.NoError(t, client.QueryRowContext(ctx, "test.outbox.count", `SELECT COUNT(*) FROM event_outbox`).Scan(&outboxAfter))
+	require.Equal(t, outboxBefore+2, outboxAfter)
+	require.ErrorIs(t, service.CancelMealAllocation(ctx, completed), domain.ErrReservationConsumed)
 }

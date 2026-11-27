@@ -38,6 +38,7 @@ func eventBinding(conf config.Env) *amqp.BindConfig {
 			appID + ".Echo",
 			"inventory.AllocationCompleted",
 			"inventory.AllocationCancelled",
+			"inventory.AllocationConsumed",
 			"shopping.ShortagesCancelled",
 		},
 	}

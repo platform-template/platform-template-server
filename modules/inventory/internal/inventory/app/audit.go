@@ -12,6 +12,7 @@ import (
 const (
 	auditInventoryTarget   = "inventory"
 	auditReservationTarget = "reservation"
+	auditMealItemTarget    = "meal_item"
 )
 
 // auditRecord is owned by Inventory: it chooses which domain operations to audit.
@@ -47,7 +48,7 @@ func auditRecord(message proto.Message) (*auditevents.AuditRecordRequested, erro
 		record.Action, record.TargetType, record.TargetId, record.ActorId = "reservation.consumed", auditReservationTarget, v.ReservationId, v.ActorId
 		metadata["inventoryId"] = v.InventoryId
 	case *inventoryevents.AllocationCompleted:
-		record.Action, record.TargetType, record.TargetId, record.ActorId = "allocation.completed", "meal_item", v.ItemId, v.ActorId
+		record.Action, record.TargetType, record.TargetId, record.ActorId = "allocation.completed", auditMealItemTarget, v.ItemId, v.ActorId
 		metadata["revision"], metadata["shortageCount"] = v.Revision, len(v.Shortages)
 	default:
 		return nil, fmt.Errorf("no inventory audit policy for %T", message)

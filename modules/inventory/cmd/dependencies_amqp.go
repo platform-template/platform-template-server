@@ -38,6 +38,7 @@ func eventBinding(conf config.Env) *amqp.BindConfig {
 			appID + ".Echo",
 			"mealplanner.MealPlanningRequested",
 			"mealplanner.MealCancellationRequested",
+			"mealplanner.MealCompletionRequested",
 		},
 	}
 }

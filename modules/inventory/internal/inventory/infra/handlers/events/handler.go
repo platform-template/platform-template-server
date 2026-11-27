@@ -14,9 +14,12 @@ import (
 	"github.com/distributed-programming-2026/go-sdk/pkg/event"
 )
 
+const mealPlannerProducer = "mealplanner"
+
 type allocator interface {
 	AllocateMeal(context.Context, app.MealAllocation) error
 	CancelMealAllocation(context.Context, domain.AllocationIdentity) error
+	CompleteMealAllocation(context.Context, domain.AllocationIdentity) error
 }
 type handler struct {
 	logger    *slog.Logger
@@ -42,10 +45,13 @@ func (h *handler) Handle(ctx context.Context, envelope event.Envelope) error {
 		h.logger.InfoContext(ctx, "echo received", slog.String("echo_id", echo.ID), slog.String("body", echo.Body))
 		return nil
 	}
-	if envelope.Producer() == "mealplanner" && envelope.Type() == "MealCancellationRequested" {
+	if envelope.Producer() == mealPlannerProducer && envelope.Type() == "MealCancellationRequested" {
 		return h.cancel(ctx, envelope)
 	}
-	if envelope.Producer() != "mealplanner" || envelope.Type() != "MealPlanningRequested" {
+	if envelope.Producer() == mealPlannerProducer && envelope.Type() == "MealCompletionRequested" {
+		return h.complete(ctx, envelope)
+	}
+	if envelope.Producer() != mealPlannerProducer || envelope.Type() != "MealPlanningRequested" {
 		return fmt.Errorf("unsupported event %s.%s", envelope.Producer(), envelope.Type())
 	}
 	var payload mealplannerevents.MealPlanningRequested
@@ -96,30 +102,57 @@ func (h *handler) Handle(ctx context.Context, envelope event.Envelope) error {
 	return h.allocator.AllocateMeal(ctx, request)
 }
 
+func (h *handler) complete(ctx context.Context, envelope event.Envelope) error {
+	var payload mealplannerevents.MealCompletionRequested
+	if err := envelope.UnmarshalPayload(&payload); err != nil {
+		return err
+	}
+	identity, err := allocationIdentity(
+		payload.PlanId, payload.ItemId, payload.Revision, payload.ActorId, payload.ShoppingListId, payload.InventoryIds,
+	)
+	if err != nil {
+		return err
+	}
+	return h.allocator.CompleteMealAllocation(ctx, identity)
+}
+
 func (h *handler) cancel(ctx context.Context, envelope event.Envelope) error {
 	var payload mealplannerevents.MealCancellationRequested
 	if err := envelope.UnmarshalPayload(&payload); err != nil {
 		return err
 	}
-	plan, err := eventID(payload.PlanId)
+	identity, err := allocationIdentity(
+		payload.PlanId, payload.ItemId, payload.Revision, payload.ActorId, payload.ShoppingListId, payload.InventoryIds,
+	)
 	if err != nil {
 		return err
 	}
-	item, err := eventID(payload.ItemId)
+	return h.allocator.CancelMealAllocation(ctx, identity)
+}
+
+func allocationIdentity(
+	planRaw, itemRaw, revisionRaw, actorRaw, shoppingRaw string,
+	inventoryRaw []string,
+) (domain.AllocationIdentity, error) {
+	plan, err := eventID(planRaw)
 	if err != nil {
-		return err
+		return domain.AllocationIdentity{}, err
 	}
-	revision, err := eventID(payload.Revision)
+	item, err := eventID(itemRaw)
 	if err != nil {
-		return err
+		return domain.AllocationIdentity{}, err
 	}
-	actor, err := eventID(payload.ActorId)
+	revision, err := eventID(revisionRaw)
 	if err != nil {
-		return err
+		return domain.AllocationIdentity{}, err
 	}
-	shopping, err := eventID(payload.ShoppingListId)
+	actor, err := eventID(actorRaw)
 	if err != nil {
-		return err
+		return domain.AllocationIdentity{}, err
+	}
+	shopping, err := eventID(shoppingRaw)
+	if err != nil {
+		return domain.AllocationIdentity{}, err
 	}
 	identity := domain.AllocationIdentity{
 		PlanID:         plan,
@@ -128,12 +161,12 @@ func (h *handler) cancel(ctx context.Context, envelope event.Envelope) error {
 		ActorID:        actor,
 		ShoppingListID: shopping,
 	}
-	for _, raw := range payload.InventoryIds {
+	for _, raw := range inventoryRaw {
 		id, err := eventID(raw)
 		if err != nil {
-			return err
+			return domain.AllocationIdentity{}, err
 		}
 		identity.InventoryIDs = append(identity.InventoryIDs, id)
 	}
-	return h.allocator.CancelMealAllocation(ctx, identity)
+	return identity, nil
 }

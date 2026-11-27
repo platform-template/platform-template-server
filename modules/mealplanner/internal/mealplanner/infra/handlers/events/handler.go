@@ -15,9 +15,12 @@ import (
 	"github.com/distributed-programming-2026/go-sdk/pkg/event"
 )
 
+const inventoryProducer = "inventory"
+
 type allocationHandler interface {
 	ApplyAllocation(context.Context, app.AllocationResult) error
 	ConfirmCancellation(context.Context, app.CancellationConfirmation) error
+	ConfirmCompletion(context.Context, app.CompletionConfirmation) error
 }
 type handler struct {
 	logger  *slog.Logger
@@ -43,39 +46,61 @@ func (h *handler) Handle(ctx context.Context, envelope event.Envelope) error {
 		h.logger.InfoContext(ctx, "echo received", slog.String("echo_id", echo.ID), slog.String("body", echo.Body))
 		return nil
 	}
-	if envelope.Producer() == "inventory" && envelope.Type() == "AllocationCancelled" {
-		var payload inventoryevents.AllocationCancelled
-		if err := envelope.UnmarshalPayload(&payload); err != nil {
-			return err
-		}
-		return h.confirm(
-			ctx,
-			payload.ActorId,
-			payload.PlanId,
-			payload.ItemId,
-			payload.Revision,
-			payload.ShoppingListId,
-			domain.InventoryParticipant,
-		)
-	}
-	if envelope.Producer() == "shopping" && envelope.Type() == "ShortagesCancelled" {
-		var payload shoppingevents.ShortagesCancelled
-		if err := envelope.UnmarshalPayload(&payload); err != nil {
-			return err
-		}
-		return h.confirm(
-			ctx,
-			payload.ActorId,
-			payload.PlanId,
-			payload.ItemId,
-			payload.Revision,
-			payload.ShoppingListId,
-			domain.ShoppingParticipant,
-		)
-	}
-	if envelope.Producer() != "inventory" || envelope.Type() != "AllocationCompleted" {
+	switch {
+	case envelope.Producer() == inventoryProducer && envelope.Type() == "AllocationCancelled":
+		return h.confirmInventoryCancellation(ctx, envelope)
+	case envelope.Producer() == "shopping" && envelope.Type() == "ShortagesCancelled":
+		return h.confirmShoppingCancellation(ctx, envelope)
+	case envelope.Producer() == inventoryProducer && envelope.Type() == "AllocationConsumed":
+		return h.confirmConsumption(ctx, envelope)
+	case envelope.Producer() == inventoryProducer && envelope.Type() == "AllocationCompleted":
+		return h.applyAllocation(ctx, envelope)
+	default:
 		return fmt.Errorf("unsupported event %s.%s", envelope.Producer(), envelope.Type())
 	}
+}
+
+func (h *handler) confirmInventoryCancellation(ctx context.Context, envelope event.Envelope) error {
+	var payload inventoryevents.AllocationCancelled
+	if err := envelope.UnmarshalPayload(&payload); err != nil {
+		return err
+	}
+	return h.confirm(
+		ctx,
+		payload.ActorId,
+		payload.PlanId,
+		payload.ItemId,
+		payload.Revision,
+		payload.ShoppingListId,
+		domain.InventoryParticipant,
+	)
+}
+
+func (h *handler) confirmShoppingCancellation(ctx context.Context, envelope event.Envelope) error {
+	var payload shoppingevents.ShortagesCancelled
+	if err := envelope.UnmarshalPayload(&payload); err != nil {
+		return err
+	}
+	return h.confirm(
+		ctx,
+		payload.ActorId,
+		payload.PlanId,
+		payload.ItemId,
+		payload.Revision,
+		payload.ShoppingListId,
+		domain.ShoppingParticipant,
+	)
+}
+
+func (h *handler) confirmConsumption(ctx context.Context, envelope event.Envelope) error {
+	var payload inventoryevents.AllocationConsumed
+	if err := envelope.UnmarshalPayload(&payload); err != nil {
+		return err
+	}
+	return h.complete(ctx, payload.ActorId, payload.PlanId, payload.ItemId, payload.Revision, payload.ShoppingListId)
+}
+
+func (h *handler) applyAllocation(ctx context.Context, envelope event.Envelope) error {
 	var payload inventoryevents.AllocationCompleted
 	if err := envelope.UnmarshalPayload(&payload); err != nil {
 		return err
@@ -139,6 +164,39 @@ func (h *handler) Handle(ctx context.Context, envelope event.Envelope) error {
 		result.Shortages = append(result.Shortages, domain.Ingredient{ProductID: product, Quantity: line.GetQuantity()})
 	}
 	return h.service.ApplyAllocation(ctx, result)
+}
+
+func (h *handler) complete(ctx context.Context, actorRaw, planRaw, itemRaw, revisionRaw, listRaw string) error {
+	actor, err := parseID(actorRaw)
+	if err != nil {
+		return err
+	}
+	plan, err := parseID(planRaw)
+	if err != nil {
+		return err
+	}
+	item, err := parseID(itemRaw)
+	if err != nil {
+		return err
+	}
+	revision, err := parseID(revisionRaw)
+	if err != nil {
+		return err
+	}
+	list, err := parseID(listRaw)
+	if err != nil {
+		return err
+	}
+	return h.service.ConfirmCompletion(
+		ctx,
+		app.CompletionConfirmation{
+			ActorID:        actor,
+			PlanID:         plan,
+			ItemID:         item,
+			Revision:       revision,
+			ShoppingListID: list,
+		},
+	)
 }
 
 func (h *handler) confirm(
