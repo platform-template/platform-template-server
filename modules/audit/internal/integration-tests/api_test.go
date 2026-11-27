@@ -16,6 +16,7 @@ import (
 	"github.com/stretchr/testify/require"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
+	"google.golang.org/protobuf/proto"
 
 	domainevent "github.com/distributed-programming-2026/lib/event"
 
@@ -97,6 +98,46 @@ func TestInventoryEventIsAuditedOnce(t *testing.T) {
 	require.Equal(t, inventoryID.String(), target)
 	require.Equal(t, envelope.CorrelationID(), correlation)
 	require.Equal(t, actor[:], actorBytes)
+}
+
+func TestReservationEventsAreAudited(t *testing.T) {
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	connection := amqp.NewConnection(moduleID, amqp.ConnectionConfig{
+		URL: testEnv.conf.AMQP.URL, ConnectTimeout: time.Second,
+	}, logger)
+	defer func() { require.NoError(t, connection.Stop()) }()
+	dispatcher, err := eventamqp.NewDispatcher(connection.Producer(domainevent.DomainExchange(), nil, nil))
+	require.NoError(t, err)
+	require.NoError(t, connection.Start())
+	inventoryID, reservationID, otherID, productID := uuid.New(), uuid.New(), uuid.New(), uuid.New()
+	events := []struct {
+		name, action string
+		target       string
+		payload      proto.Message
+	}{
+		{"ReservationCreated", "reservation.created", reservationID.String(), &inventoryevents.ReservationCreated{
+			InventoryId: inventoryID.String(), ReservationId: reservationID.String(),
+			Items: []*inventoryevents.ReservationLine{{ProductId: productID.String(), Quantity: 2}},
+		}},
+		{"ReservationCancelled", "reservation.cancelled", reservationID.String(), &inventoryevents.ReservationCancelled{
+			InventoryId: inventoryID.String(), ReservationId: reservationID.String(),
+		}},
+		{"ReservationConsumed", "reservation.consumed", otherID.String(), &inventoryevents.ReservationConsumed{
+			InventoryId: inventoryID.String(), ReservationId: otherID.String(),
+		}},
+	}
+	for _, item := range events {
+		envelope, err := event.New(t.Context(), "inventory", item.name, item.payload)
+		require.NoError(t, err)
+		require.NoError(t, dispatcher.Dispatch(t.Context(), envelope))
+		waitHandled(t, envelope, 1)
+		var action, target string
+		err = testEnv.connector.TransactionalClient().QueryRowContext(t.Context(), "test.audit.reservation",
+			`SELECT action, target_id FROM audit_entries WHERE event_id = ?`, envelope.ID()).Scan(&action, &target)
+		require.NoError(t, err)
+		require.Equal(t, item.action, action)
+		require.Equal(t, item.target, target)
+	}
 }
 
 func TestInvalidHTTPRequests(t *testing.T) {

@@ -26,7 +26,7 @@ func (r *captureRecorder) RecordAuditEntry(
 }
 
 func TestInventoryEvents(t *testing.T) {
-	actor, inventoryID, productID := uuid.New(), uuid.New(), uuid.New()
+	actor, inventoryID, productID, reservationID := uuid.New(), uuid.New(), uuid.New(), uuid.New()
 	tests := []struct {
 		eventType, action, target string
 		message                   proto.Message
@@ -83,6 +83,37 @@ func TestInventoryEvents(t *testing.T) {
 				ProductId:     productID.String(),
 				ActorId:       actor.String(),
 				QuantityDelta: -5,
+			},
+		},
+		{
+			"ReservationCreated",
+			"reservation.created",
+			reservationID.String(),
+			&inventoryevents.ReservationCreated{
+				InventoryId:   inventoryID.String(),
+				ReservationId: reservationID.String(),
+				ActorId:       actor.String(),
+				Items:         []*inventoryevents.ReservationLine{{ProductId: productID.String(), Quantity: 5}},
+			},
+		},
+		{
+			"ReservationCancelled",
+			"reservation.cancelled",
+			reservationID.String(),
+			&inventoryevents.ReservationCancelled{
+				InventoryId:   inventoryID.String(),
+				ReservationId: reservationID.String(),
+				ActorId:       actor.String(),
+			},
+		},
+		{
+			"ReservationConsumed",
+			"reservation.consumed",
+			reservationID.String(),
+			&inventoryevents.ReservationConsumed{
+				InventoryId:   inventoryID.String(),
+				ReservationId: reservationID.String(),
+				ActorId:       actor.String(),
 			},
 		},
 	}

@@ -118,6 +118,13 @@ func inventoryEntry(envelope event.Envelope) (app.RecordAuditEntryInput, error) 
 			"productId":     payload.ProductId,
 			"quantityDelta": payload.QuantityDelta,
 		}
+	case "ReservationCreated", "ReservationCancelled", "ReservationConsumed":
+		details, err := reservationDetails(envelope)
+		if err != nil {
+			return input, err
+		}
+		input.Action, input.TargetType, input.TargetID = details.action, "reservation", details.id
+		actor, metadata = details.actor, details.metadata
 	default:
 		return input, fmt.Errorf("unsupported inventory event type %q", envelope.Type())
 	}
@@ -137,6 +144,60 @@ func inventoryEntry(envelope event.Envelope) (app.RecordAuditEntryInput, error) 
 	}
 	input.Metadata = encoded
 	return input, nil
+}
+
+type reservationAuditDetails struct {
+	action   string
+	id       string
+	actor    string
+	metadata map[string]any
+}
+
+func reservationDetails(envelope event.Envelope) (reservationAuditDetails, error) {
+	var result reservationAuditDetails
+	var inventoryID string
+	switch envelope.Type() {
+	case "ReservationCreated":
+		var payload inventoryevents.ReservationCreated
+		if err := envelope.UnmarshalPayload(&payload); err != nil {
+			return result, err
+		}
+		if len(payload.Items) == 0 {
+			return result, errors.New("reservation has no items")
+		}
+		for _, item := range payload.Items {
+			if _, err := parseID(item.GetProductId()); err != nil || item.GetQuantity() <= 0 {
+				return result, errors.New("invalid reservation item")
+			}
+		}
+		result.action, result.id, result.actor = "reservation.created", payload.ReservationId, payload.ActorId
+		inventoryID = payload.InventoryId
+		result.metadata = map[string]any{"itemCount": len(payload.Items)}
+	case "ReservationCancelled":
+		var payload inventoryevents.ReservationCancelled
+		if err := envelope.UnmarshalPayload(&payload); err != nil {
+			return result, err
+		}
+		result.action, result.id, result.actor = "reservation.cancelled", payload.ReservationId, payload.ActorId
+		inventoryID = payload.InventoryId
+	case "ReservationConsumed":
+		var payload inventoryevents.ReservationConsumed
+		if err := envelope.UnmarshalPayload(&payload); err != nil {
+			return result, err
+		}
+		result.action, result.id, result.actor = "reservation.consumed", payload.ReservationId, payload.ActorId
+		inventoryID = payload.InventoryId
+	default:
+		return result, errors.New("unsupported reservation event")
+	}
+	if _, err := parseID(inventoryID); err != nil {
+		return result, fmt.Errorf("invalid reservation inventory: %w", err)
+	}
+	if result.metadata == nil {
+		result.metadata = make(map[string]any)
+	}
+	result.metadata["inventoryId"] = inventoryID
+	return result, nil
 }
 
 func parseID(value string) (uuid.UUID, error) {

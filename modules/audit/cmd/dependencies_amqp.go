@@ -42,6 +42,9 @@ func eventBinding(conf config.Env) *amqp.BindConfig {
 			"inventory.ProductRenamed",
 			"inventory.StockCreated",
 			"inventory.StockAdjusted",
+			"inventory.ReservationCreated",
+			"inventory.ReservationCancelled",
+			"inventory.ReservationConsumed",
 		},
 	}
 }
