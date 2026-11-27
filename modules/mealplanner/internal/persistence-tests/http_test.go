@@ -118,6 +118,21 @@ func testPlanHTTP(t *testing.T, service *app.Service) {
 	}
 	require.NoError(t, json.Unmarshal(schedule.Body.Bytes(), &item))
 	require.NotEmpty(t, item.ID)
+	itemPath := path + "/items/" + item.ID
+	current := request("GET", itemPath, "owner", "", "")
+	require.Equal(t, http.StatusOK, current.Code, current.Body.String())
+	require.Contains(t, current.Body.String(), `"state":"planning"`)
+	require.Equal(t, http.StatusNotFound, request("GET", itemPath, "stranger", "", "").Code)
+	calendar := request(
+		"GET",
+		path+"/items?from=2026-12-01T00%3A00%3A00Z&to=2026-12-02T00%3A00%3A00Z",
+		"owner",
+		"",
+		"",
+	)
+	require.Equal(t, http.StatusOK, calendar.Code, calendar.Body.String())
+	require.Contains(t, calendar.Body.String(), item.ID)
+	require.Equal(t, http.StatusBadRequest, request("GET", path+"/items?from=bad&to=bad", "owner", "", "").Code)
 	require.Equal(t, http.StatusBadRequest, request("POST", path+"/items/"+item.ID+"/completion", "owner", "", "").Code)
 	require.Equal(
 		t,

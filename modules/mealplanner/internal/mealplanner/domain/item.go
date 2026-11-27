@@ -11,6 +11,7 @@ import (
 var (
 	ErrInvalidItem       = errors.New("invalid meal item")
 	ErrInvalidTransition = errors.New("invalid meal item transition")
+	ErrItemNotFound      = errors.New("meal item not found")
 )
 
 type ItemKind string
