@@ -30,11 +30,11 @@ type HTTP struct {
 }
 
 type Session struct {
-	Address string `envconfig:"address" default:"localhost:8081"`
+	Address string `envconfig:"address" default:"session-service:8081"`
 }
 
 type Authz struct {
-	Address string `envconfig:"address" default:"localhost:8081"`
+	Address string `envconfig:"address" default:"authz-service:8081"`
 }
 
 type MySQL struct {
