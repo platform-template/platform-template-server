@@ -133,4 +133,5 @@ func testScheduling(
 	)
 	require.Equal(t, countBefore, countAfter)
 	testAllocationInbox(ctx, t, client, unit, base, owner, item)
+	testCancellationInbox(ctx, t, client, unit, base, owner, item)
 }

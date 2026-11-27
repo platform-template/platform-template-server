@@ -104,7 +104,7 @@ func (s *Service) Schedule(ctx context.Context, owner uuid.UUID, input ScheduleI
 			return err
 		}
 		metadata, err := json.Marshal(
-			map[string]string{"planId": data.PlanID.String(), "revision": data.Revision.String()},
+			map[string]string{auditPlanIDKey: data.PlanID.String(), auditRevisionKey: data.Revision.String()},
 		)
 		if err != nil {
 			return err
@@ -113,7 +113,7 @@ func (s *Service) Schedule(ctx context.Context, owner uuid.UUID, input ScheduleI
 			&auditevents.AuditRecordRequested{
 				ActorId:      owner.String(),
 				Action:       "meal_item.planning_requested",
-				TargetType:   "meal_item",
+				TargetType:   auditMealItemTarget,
 				TargetId:     data.ID.String(),
 				MetadataJson: metadata,
 			},

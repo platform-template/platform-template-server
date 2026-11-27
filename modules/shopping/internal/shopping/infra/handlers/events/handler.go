@@ -7,6 +7,7 @@ import (
 	"uuid"
 
 	inventoryevents "inventory/api/events"
+	mealplannerevents "mealplanner/api/events"
 	shoppingevents "shopping/api/events"
 	"shopping/internal/shopping/app"
 	"shopping/internal/shopping/domain"
@@ -16,6 +17,7 @@ import (
 
 type shortageRecorder interface {
 	RecordShortages(context.Context, app.AllocationResult) error
+	CancelShortages(context.Context, uuid.UUID, uuid.UUID, domain.Source) error
 }
 type handler struct {
 	logger  *slog.Logger
@@ -40,6 +42,9 @@ func (h *handler) Handle(ctx context.Context, envelope event.Envelope) error {
 		}
 		h.logger.InfoContext(ctx, "echo received", slog.String("echo_id", echo.ID), slog.String("body", echo.Body))
 		return nil
+	}
+	if envelope.Producer() == "mealplanner" && envelope.Type() == "MealCancellationRequested" {
+		return h.cancel(ctx, envelope)
 	}
 	if envelope.Producer() != "inventory" || envelope.Type() != "AllocationCompleted" {
 		return fmt.Errorf("unsupported event %s.%s", envelope.Producer(), envelope.Type())
@@ -82,4 +87,37 @@ func (h *handler) Handle(ctx context.Context, envelope event.Envelope) error {
 		result.Shortages = append(result.Shortages, app.Shortage{ProductID: product, Quantity: shortage.GetQuantity()})
 	}
 	return h.service.RecordShortages(ctx, result)
+}
+
+func (h *handler) cancel(ctx context.Context, envelope event.Envelope) error {
+	var payload mealplannerevents.MealCancellationRequested
+	if err := envelope.UnmarshalPayload(&payload); err != nil {
+		return err
+	}
+	actor, err := parseID(payload.ActorId)
+	if err != nil {
+		return err
+	}
+	list, err := parseID(payload.ShoppingListId)
+	if err != nil {
+		return err
+	}
+	plan, err := parseID(payload.PlanId)
+	if err != nil {
+		return err
+	}
+	item, err := parseID(payload.ItemId)
+	if err != nil {
+		return err
+	}
+	revision, err := parseID(payload.Revision)
+	if err != nil {
+		return err
+	}
+	return h.service.CancelShortages(
+		ctx,
+		actor,
+		list,
+		domain.Source{MealPlanID: plan, MealItemID: item, Revision: revision},
+	)
 }

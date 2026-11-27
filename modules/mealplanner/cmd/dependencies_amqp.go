@@ -37,6 +37,8 @@ func eventBinding(conf config.Env) *amqp.BindConfig {
 		RoutingKeys: []string{
 			appID + ".Echo",
 			"inventory.AllocationCompleted",
+			"inventory.AllocationCancelled",
+			"shopping.ShortagesCancelled",
 		},
 	}
 }

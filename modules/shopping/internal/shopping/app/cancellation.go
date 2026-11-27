@@ -8,6 +8,7 @@ import (
 	"uuid"
 
 	auditevents "audit/api/events"
+	shoppingevents "shopping/api/events"
 	"shopping/internal/shopping/domain"
 	"shopping/internal/shopping/infra/mysql"
 )
@@ -43,8 +44,28 @@ func (s *Service) CancelShortages(ctx context.Context, actorID, listID uuid.UUID
 		if err != nil {
 			return err
 		}
-		return s.dispatcherFactory.NewDispatcher(ctx).
-			Dispatch(&auditevents.AuditRecordRequested{ActorId: actorID.String(), Action: "shopping_list.shortages_cancelled", TargetType: auditListTarget, TargetId: listID.String(), MetadataJson: metadata})
+		dispatcher := s.dispatcherFactory.NewDispatcher(ctx)
+		if err := dispatcher.Dispatch(
+			&shoppingevents.ShortagesCancelled{
+				PlanId:         source.MealPlanID.String(),
+				ItemId:         source.MealItemID.String(),
+				Revision:       source.Revision.String(),
+				ActorId:        actorID.String(),
+				ShoppingListId: listID.String(),
+			},
+		); err != nil {
+			return err
+		}
+		return dispatcher.
+			Dispatch(
+				&auditevents.AuditRecordRequested{
+					ActorId:      actorID.String(),
+					Action:       "shopping_list.shortages_cancelled",
+					TargetType:   auditListTarget,
+					TargetId:     listID.String(),
+					MetadataJson: metadata,
+				},
+			)
 	})
 	if err != nil {
 		return fmt.Errorf("cancel shortages: %w", err)

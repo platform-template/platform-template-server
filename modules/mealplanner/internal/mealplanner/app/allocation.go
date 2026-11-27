@@ -63,16 +63,16 @@ func (s *Service) ApplyAllocation(ctx context.Context, result AllocationResult) 
 		}
 		metadata, err := json.Marshal(
 			map[string]any{
-				"planId":   result.PlanID.String(),
-				"revision": result.Revision.String(),
-				"state":    item.Data().State,
+				auditPlanIDKey:   result.PlanID.String(),
+				auditRevisionKey: result.Revision.String(),
+				"state":          item.Data().State,
 			},
 		)
 		if err != nil {
 			return err
 		}
 		return s.dispatcherFactory.NewDispatcher(ctx).
-			Dispatch(&auditevents.AuditRecordRequested{ActorId: result.ActorID.String(), Action: "meal_item.allocation_updated", TargetType: "meal_item", TargetId: result.ItemID.String(), MetadataJson: metadata})
+			Dispatch(&auditevents.AuditRecordRequested{ActorId: result.ActorID.String(), Action: "meal_item.allocation_updated", TargetType: auditMealItemTarget, TargetId: result.ItemID.String(), MetadataJson: metadata})
 	})
 	if err != nil {
 		return fmt.Errorf("apply meal allocation: %w", err)

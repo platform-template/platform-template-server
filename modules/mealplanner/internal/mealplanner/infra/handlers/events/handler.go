@@ -10,12 +10,14 @@ import (
 	mealplannerevents "mealplanner/api/events"
 	"mealplanner/internal/mealplanner/app"
 	"mealplanner/internal/mealplanner/domain"
+	shoppingevents "shopping/api/events"
 
 	"github.com/distributed-programming-2026/go-sdk/pkg/event"
 )
 
 type allocationHandler interface {
 	ApplyAllocation(context.Context, app.AllocationResult) error
+	ConfirmCancellation(context.Context, app.CancellationConfirmation) error
 }
 type handler struct {
 	logger  *slog.Logger
@@ -40,6 +42,36 @@ func (h *handler) Handle(ctx context.Context, envelope event.Envelope) error {
 		}
 		h.logger.InfoContext(ctx, "echo received", slog.String("echo_id", echo.ID), slog.String("body", echo.Body))
 		return nil
+	}
+	if envelope.Producer() == "inventory" && envelope.Type() == "AllocationCancelled" {
+		var payload inventoryevents.AllocationCancelled
+		if err := envelope.UnmarshalPayload(&payload); err != nil {
+			return err
+		}
+		return h.confirm(
+			ctx,
+			payload.ActorId,
+			payload.PlanId,
+			payload.ItemId,
+			payload.Revision,
+			payload.ShoppingListId,
+			domain.InventoryParticipant,
+		)
+	}
+	if envelope.Producer() == "shopping" && envelope.Type() == "ShortagesCancelled" {
+		var payload shoppingevents.ShortagesCancelled
+		if err := envelope.UnmarshalPayload(&payload); err != nil {
+			return err
+		}
+		return h.confirm(
+			ctx,
+			payload.ActorId,
+			payload.PlanId,
+			payload.ItemId,
+			payload.Revision,
+			payload.ShoppingListId,
+			domain.ShoppingParticipant,
+		)
 	}
 	if envelope.Producer() != "inventory" || envelope.Type() != "AllocationCompleted" {
 		return fmt.Errorf("unsupported event %s.%s", envelope.Producer(), envelope.Type())
@@ -107,4 +139,42 @@ func (h *handler) Handle(ctx context.Context, envelope event.Envelope) error {
 		result.Shortages = append(result.Shortages, domain.Ingredient{ProductID: product, Quantity: line.GetQuantity()})
 	}
 	return h.service.ApplyAllocation(ctx, result)
+}
+
+func (h *handler) confirm(
+	ctx context.Context,
+	actorRaw, planRaw, itemRaw, revisionRaw, listRaw string,
+	participant domain.CancellationParticipant,
+) error {
+	actor, err := parseID(actorRaw)
+	if err != nil {
+		return err
+	}
+	plan, err := parseID(planRaw)
+	if err != nil {
+		return err
+	}
+	item, err := parseID(itemRaw)
+	if err != nil {
+		return err
+	}
+	revision, err := parseID(revisionRaw)
+	if err != nil {
+		return err
+	}
+	list, err := parseID(listRaw)
+	if err != nil {
+		return err
+	}
+	return h.service.ConfirmCancellation(
+		ctx,
+		app.CancellationConfirmation{
+			ActorID:        actor,
+			PlanID:         plan,
+			ItemID:         item,
+			Revision:       revision,
+			ShoppingListID: list,
+			Participant:    participant,
+		},
+	)
 }

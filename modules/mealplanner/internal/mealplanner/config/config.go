@@ -46,6 +46,7 @@ type MySQL struct {
 }
 
 type AMQP struct {
+	ShoppingQueue  string        `envconfig:"shopping_queue"  default:"shopping.echo"`
 	InventoryQueue string        `envconfig:"inventory_queue" default:"inventory.echo"`
 	AuditQueue     string        `envconfig:"audit_queue"     default:"audit.echo"`
 	URL            string        `envconfig:"url"             default:"amqp://local:local@localhost:5672/"`
@@ -74,7 +75,7 @@ func (c Env) Validate() error {
 	if c.MySQL.MaxConnections <= 0 || c.AMQP.PrefetchCount <= 0 || c.Relay.BatchSize <= 0 {
 		return errors.New("connection, prefetch and batch counts must be positive")
 	}
-	if c.AMQP.InventoryQueue == "" || c.AMQP.AuditQueue == "" {
+	if c.AMQP.InventoryQueue == "" || c.AMQP.AuditQueue == "" || c.AMQP.ShoppingQueue == "" {
 		return errors.New("subscriber queue names must not be empty")
 	}
 	if c.MySQL.Address == "" || c.MySQL.Database == "" || c.MySQL.User == "" || c.AMQP.URL == "" ||

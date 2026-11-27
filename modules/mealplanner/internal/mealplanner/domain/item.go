@@ -55,23 +55,25 @@ type RecipeSnapshot struct {
 }
 
 type ItemData struct {
-	ID                 uuid.UUID
-	PlanID             uuid.UUID
-	Kind               ItemKind
-	RecipeID           uuid.UUID
-	RecipeName         string
-	RecipeDescription  string
-	RecipeInstructions string
-	Servings           int64
-	ScheduledAt        time.Time
-	Ingredients        []Ingredient
-	InventoryIDs       []uuid.UUID
-	ShoppingListID     uuid.UUID
-	Revision           uuid.UUID
-	ReservationVersion uint64
-	State              ItemState
-	Shortages          []Ingredient
-	Allocations        []AllocationLine
+	ID                             uuid.UUID
+	PlanID                         uuid.UUID
+	Kind                           ItemKind
+	RecipeID                       uuid.UUID
+	RecipeName                     string
+	RecipeDescription              string
+	RecipeInstructions             string
+	Servings                       int64
+	ScheduledAt                    time.Time
+	Ingredients                    []Ingredient
+	InventoryIDs                   []uuid.UUID
+	ShoppingListID                 uuid.UUID
+	Revision                       uuid.UUID
+	ReservationVersion             uint64
+	State                          ItemState
+	Shortages                      []Ingredient
+	Allocations                    []AllocationLine
+	InventoryCancellationConfirmed bool
+	ShoppingCancellationConfirmed  bool
 }
 
 type Item struct{ data ItemData }
@@ -113,6 +115,8 @@ func NewItem(data ItemData) (*Item, error) {
 	data.Shortages = nil
 	data.Allocations = nil
 	data.State = Planning
+	data.InventoryCancellationConfirmed = false
+	data.ShoppingCancellationConfirmed = false
 	data.ReservationVersion = 0
 	data.ScheduledAt = data.ScheduledAt.UTC()
 	return &Item{data: data}, nil
@@ -137,7 +141,15 @@ func RestoreItem(data ItemData) (*Item, error) {
 		if data.ReservationVersion == 0 || len(data.Shortages) != 0 {
 			return nil, ErrInvalidItem
 		}
-	case Cancelling, Cancelled, Failed:
+	case Cancelling:
+		if data.InventoryCancellationConfirmed && data.ShoppingCancellationConfirmed {
+			return nil, ErrInvalidItem
+		}
+	case Cancelled:
+		if !data.InventoryCancellationConfirmed || !data.ShoppingCancellationConfirmed {
+			return nil, ErrInvalidItem
+		}
+	case Failed:
 	default:
 		return nil, ErrInvalidItem
 	}
@@ -158,6 +170,8 @@ func RestoreItem(data ItemData) (*Item, error) {
 		}
 	}
 	item.data.Allocations = append([]AllocationLine(nil), data.Allocations...)
+	item.data.InventoryCancellationConfirmed = data.InventoryCancellationConfirmed
+	item.data.ShoppingCancellationConfirmed = data.ShoppingCancellationConfirmed
 	item.data.State = data.State
 	item.data.ReservationVersion = data.ReservationVersion
 	item.data.Shortages = append([]Ingredient(nil), data.Shortages...)
@@ -243,12 +257,38 @@ func (i *Item) RequestCancellation() error {
 	}
 }
 
-func (i *Item) ConfirmCancellation(revision uuid.UUID) bool {
-	if revision != i.data.Revision || i.data.State != Cancelling {
-		return false
+type CancellationParticipant string
+
+const (
+	InventoryParticipant CancellationParticipant = "inventory"
+	ShoppingParticipant  CancellationParticipant = "shopping"
+)
+
+func (i *Item) ConfirmCancellation(revision uuid.UUID, participant CancellationParticipant) (bool, error) {
+	if revision != i.data.Revision || i.data.State == Cancelled {
+		return false, nil
 	}
-	i.data.State = Cancelled
-	return true
+	if i.data.State != Cancelling {
+		return false, ErrInvalidTransition
+	}
+	switch participant {
+	case InventoryParticipant:
+		if i.data.InventoryCancellationConfirmed {
+			return false, nil
+		}
+		i.data.InventoryCancellationConfirmed = true
+	case ShoppingParticipant:
+		if i.data.ShoppingCancellationConfirmed {
+			return false, nil
+		}
+		i.data.ShoppingCancellationConfirmed = true
+	default:
+		return false, ErrInvalidTransition
+	}
+	if i.data.InventoryCancellationConfirmed && i.data.ShoppingCancellationConfirmed {
+		i.data.State = Cancelled
+	}
+	return true, nil
 }
 
 // ApplyAllocation verifies that reserved and missing quantities account for the snapshot.

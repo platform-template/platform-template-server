@@ -92,4 +92,23 @@ func TestMealPlanningDelivery(t *testing.T) {
 			Scan(&count),
 	)
 	require.Equal(t, 1, count)
+	cancelPayload := &mealplannerevents.MealCancellationRequested{
+		PlanId:         payload.PlanId,
+		ItemId:         payload.ItemId,
+		Revision:       payload.Revision,
+		ActorId:        payload.ActorId,
+		ShoppingListId: payload.ShoppingListId,
+		InventoryIds:   payload.InventoryIds,
+	}
+	cancellation, err := event.New(ctx, "mealplanner", "MealCancellationRequested", cancelPayload)
+	require.NoError(t, err)
+	require.NoError(t, dispatcher.Dispatch(ctx, cancellation))
+	require.NoError(t, dispatcher.Dispatch(ctx, cancellation))
+	waitHandled(t, cancellation, 2)
+	require.NoError(
+		t,
+		client.QueryRowContext(ctx, "test.stock", `SELECT reserved_quantity FROM stocks WHERE inventory_id = ? AND product_id = ?`, inventoryID[:], productID[:]).
+			Scan(&reserved),
+	)
+	require.Zero(t, reserved)
 }

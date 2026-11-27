@@ -10,6 +10,7 @@ import (
 
 	inventoryevents "inventory/api/events"
 	"mealplanner/internal/mealplanner/domain"
+	shoppingevents "shopping/api/events"
 
 	"github.com/distributed-programming-2026/go-sdk/pkg/amqp"
 	"github.com/distributed-programming-2026/go-sdk/pkg/event"
@@ -99,4 +100,46 @@ func TestAllocationDelivery(t *testing.T) {
 	require.Equal(t, domain.Missing, result.State)
 	require.EqualValues(t, 2, result.Shortages[0].Quantity)
 	require.Equal(t, reservation, result.Allocations[0].ReservationID)
+	restored, err := domain.RestoreItem(result)
+	require.NoError(t, err)
+	require.NoError(t, restored.RequestCancellation())
+	raw, err = json.Marshal(restored.Data())
+	require.NoError(t, err)
+	_, err = client.ExecContext(
+		ctx,
+		"fixture.cancel",
+		`UPDATE meal_items SET payload = ?, row_version = row_version + 1 WHERE id = ?`,
+		raw,
+		data.ID[:],
+	)
+	require.NoError(t, err)
+	shoppingAck := &shoppingevents.ShortagesCancelled{
+		PlanId:         plan.String(),
+		ItemId:         data.ID.String(),
+		Revision:       data.Revision.String(),
+		ActorId:        owner.String(),
+		ShoppingListId: data.ShoppingListID.String(),
+	}
+	first, err := event.New(ctx, "shopping", "ShortagesCancelled", shoppingAck)
+	require.NoError(t, err)
+	require.NoError(t, dispatcher.Dispatch(ctx, first))
+	waitHandled(t, first, 1)
+	inventoryAck := &inventoryevents.AllocationCancelled{
+		PlanId:         plan.String(),
+		ItemId:         data.ID.String(),
+		Revision:       data.Revision.String(),
+		ActorId:        owner.String(),
+		ShoppingListId: data.ShoppingListID.String(),
+	}
+	second, err := event.New(ctx, "inventory", "AllocationCancelled", inventoryAck)
+	require.NoError(t, err)
+	require.NoError(t, dispatcher.Dispatch(ctx, second))
+	waitHandled(t, second, 1)
+	require.NoError(
+		t,
+		client.QueryRowContext(ctx, "test.item", `SELECT payload, row_version FROM meal_items WHERE id = ?`, data.ID[:]).
+			Scan(&stored, &version),
+	)
+	require.NoError(t, json.Unmarshal(stored, &result))
+	require.Equal(t, domain.Cancelled, result.State)
 }

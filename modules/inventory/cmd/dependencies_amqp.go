@@ -37,6 +37,7 @@ func eventBinding(conf config.Env) *amqp.BindConfig {
 		RoutingKeys: []string{
 			appID + ".Echo",
 			"mealplanner.MealPlanningRequested",
+			"mealplanner.MealCancellationRequested",
 		},
 	}
 }

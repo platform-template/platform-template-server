@@ -18,3 +18,12 @@ message MealPlanningRequested {
  string shopping_list_id = 6;
  repeated MealIngredient ingredients = 7;
 }
+
+message MealCancellationRequested {
+ string plan_id = 1;
+ string item_id = 2;
+ string revision = 3;
+ string actor_id = 4;
+ string shopping_list_id = 5;
+ repeated string inventory_ids = 6;
+}

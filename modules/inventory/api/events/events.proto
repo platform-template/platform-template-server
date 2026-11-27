@@ -82,3 +82,11 @@ message AllocationCompleted {
  repeated ReservationLine shortages = 7;
  uint64 result_version = 8;
 }
+
+message AllocationCancelled {
+ string plan_id = 1;
+ string item_id = 2;
+ string revision = 3;
+ string actor_id = 4;
+ string shopping_list_id = 5;
+}

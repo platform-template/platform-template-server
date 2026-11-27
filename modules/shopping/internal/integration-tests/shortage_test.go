@@ -8,6 +8,7 @@ import (
 	"uuid"
 
 	inventoryevents "inventory/api/events"
+	mealplannerevents "mealplanner/api/events"
 
 	"github.com/distributed-programming-2026/go-sdk/pkg/amqp"
 	"github.com/distributed-programming-2026/go-sdk/pkg/event"
@@ -66,4 +67,23 @@ func TestShortageDelivery(t *testing.T) {
 			Scan(&quantity),
 	)
 	require.EqualValues(t, 4, quantity)
+	cancelPayload := &mealplannerevents.MealCancellationRequested{
+		PlanId:         plan.String(),
+		ItemId:         item.String(),
+		Revision:       revision.String(),
+		ActorId:        owner.String(),
+		ShoppingListId: list.String(),
+	}
+	cancellation, err := event.New(ctx, "mealplanner", "MealCancellationRequested", cancelPayload)
+	require.NoError(t, err)
+	require.NoError(t, dispatcher.Dispatch(ctx, cancellation))
+	require.NoError(t, dispatcher.Dispatch(ctx, cancellation))
+	waitHandled(t, cancellation, 2)
+	var cancelled bool
+	require.NoError(
+		t,
+		client.QueryRowContext(ctx, "test.demand.cancelled", `SELECT cancelled FROM shopping_demands WHERE list_id = ? AND revision = ?`, list[:], revision[:]).
+			Scan(&cancelled),
+	)
+	require.True(t, cancelled)
 }

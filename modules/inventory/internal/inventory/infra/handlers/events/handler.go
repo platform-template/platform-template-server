@@ -16,6 +16,7 @@ import (
 
 type allocator interface {
 	AllocateMeal(context.Context, app.MealAllocation) error
+	CancelMealAllocation(context.Context, domain.AllocationIdentity) error
 }
 type handler struct {
 	logger    *slog.Logger
@@ -40,6 +41,9 @@ func (h *handler) Handle(ctx context.Context, envelope event.Envelope) error {
 		}
 		h.logger.InfoContext(ctx, "echo received", slog.String("echo_id", echo.ID), slog.String("body", echo.Body))
 		return nil
+	}
+	if envelope.Producer() == "mealplanner" && envelope.Type() == "MealCancellationRequested" {
+		return h.cancel(ctx, envelope)
 	}
 	if envelope.Producer() != "mealplanner" || envelope.Type() != "MealPlanningRequested" {
 		return fmt.Errorf("unsupported event %s.%s", envelope.Producer(), envelope.Type())
@@ -90,4 +94,46 @@ func (h *handler) Handle(ctx context.Context, envelope event.Envelope) error {
 		request.Items = append(request.Items, domain.ReservationItem{ProductID: id, Quantity: line.GetQuantity()})
 	}
 	return h.allocator.AllocateMeal(ctx, request)
+}
+
+func (h *handler) cancel(ctx context.Context, envelope event.Envelope) error {
+	var payload mealplannerevents.MealCancellationRequested
+	if err := envelope.UnmarshalPayload(&payload); err != nil {
+		return err
+	}
+	plan, err := eventID(payload.PlanId)
+	if err != nil {
+		return err
+	}
+	item, err := eventID(payload.ItemId)
+	if err != nil {
+		return err
+	}
+	revision, err := eventID(payload.Revision)
+	if err != nil {
+		return err
+	}
+	actor, err := eventID(payload.ActorId)
+	if err != nil {
+		return err
+	}
+	shopping, err := eventID(payload.ShoppingListId)
+	if err != nil {
+		return err
+	}
+	identity := domain.AllocationIdentity{
+		PlanID:         plan,
+		ItemID:         item,
+		Revision:       revision,
+		ActorID:        actor,
+		ShoppingListID: shopping,
+	}
+	for _, raw := range payload.InventoryIds {
+		id, err := eventID(raw)
+		if err != nil {
+			return err
+		}
+		identity.InventoryIDs = append(identity.InventoryIDs, id)
+	}
+	return h.allocator.CancelMealAllocation(ctx, identity)
 }

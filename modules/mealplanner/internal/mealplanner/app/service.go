@@ -12,6 +12,12 @@ import (
 	"mealplanner/internal/mealplanner/infra/mysql"
 )
 
+const (
+	auditMealItemTarget = "meal_item"
+	auditPlanIDKey      = "planId"
+	auditRevisionKey    = "revision"
+)
+
 type DispatcherFactory interface {
 	NewDispatcher(ctx context.Context) domainevent.Dispatcher
 }

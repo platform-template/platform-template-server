@@ -9,6 +9,7 @@ import (
 	"uuid"
 
 	inventoryevents "inventory/api/events"
+	mealplannerevents "mealplanner/api/events"
 	"shopping/internal/shopping/app"
 	"shopping/internal/shopping/domain"
 	handler "shopping/internal/shopping/infra/handlers/events"
@@ -137,13 +138,27 @@ func testShortageInbox(
 		client.QueryRowContext(ctx, "test.outbox.count", `SELECT COUNT(*) FROM event_outbox`).Scan(&after),
 	)
 	require.Equal(t, before+1, after)
-	require.NoError(t, service.CancelShortages(ctx, owner, list, source))
+	cancellation, err := event.New(
+		ctx,
+		"mealplanner",
+		"MealCancellationRequested",
+		&mealplannerevents.MealCancellationRequested{
+			PlanId:         source.MealPlanID.String(),
+			ItemId:         source.MealItemID.String(),
+			Revision:       source.Revision.String(),
+			ActorId:        owner.String(),
+			ShoppingListId: list.String(),
+		},
+	)
+	require.NoError(t, err)
+	require.NoError(t, wrapped.Handle(ctx, cancellation))
+	require.NoError(t, wrapped.Handle(ctx, cancellation))
 	require.NoError(t, service.CancelShortages(ctx, owner, list, source))
 	require.NoError(
 		t,
 		client.QueryRowContext(ctx, "test.outbox.count", `SELECT COUNT(*) FROM event_outbox`).Scan(&after),
 	)
-	require.Equal(t, before+2, after)
+	require.Equal(t, before+3, after)
 	wrongSource := source
 	wrongSource.MealItemID = uuid.New()
 	require.ErrorIs(t, service.CancelShortages(ctx, owner, list, wrongSource), domain.ErrDemandConflict)

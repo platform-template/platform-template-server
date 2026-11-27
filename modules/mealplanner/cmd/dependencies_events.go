@@ -23,7 +23,13 @@ func newDispatcher(
 	db *database,
 	connection amqp.Connection,
 ) (event.Dispatcher, *outbox.Relay, error) {
-	domainevent.DeclareSubscriber(connection, conf.AMQP.InventoryQueue, "mealplanner.MealPlanningRequested")
+	domainevent.DeclareSubscriber(
+		connection,
+		conf.AMQP.InventoryQueue,
+		"mealplanner.MealPlanningRequested",
+		"mealplanner.MealCancellationRequested",
+	)
+	domainevent.DeclareSubscriber(connection, conf.AMQP.ShoppingQueue, "mealplanner.MealCancellationRequested")
 	domainevent.DeclareSubscriber(connection, conf.AMQP.AuditQueue, "*.AuditRecordRequested")
 
 	// Declare the durable queue before publishing, even if the consumer is offline.

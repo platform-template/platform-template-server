@@ -145,7 +145,22 @@ func testMealInbox(
 		client.QueryRowContext(ctx, "test.outbox.count", `SELECT COUNT(*) FROM event_outbox`).Scan(&after),
 	)
 	require.Equal(t, before, after)
-	require.NoError(t, service.CancelMealAllocation(ctx, identity))
+	cancellation, err := event.New(
+		ctx,
+		"mealplanner",
+		"MealCancellationRequested",
+		&mealplannerevents.MealCancellationRequested{
+			PlanId:         request.PlanId,
+			ItemId:         request.ItemId,
+			Revision:       request.Revision,
+			ActorId:        request.ActorId,
+			ShoppingListId: request.ShoppingListId,
+			InventoryIds:   request.InventoryIds,
+		},
+	)
+	require.NoError(t, err)
+	require.NoError(t, wrapped.Handle(ctx, cancellation))
+	require.NoError(t, wrapped.Handle(ctx, cancellation))
 	require.NoError(t, service.CancelMealAllocation(ctx, identity))
 	released, err := service.GetStock(ctx, inventory.ID(), product.ID())
 	require.NoError(t, err)

@@ -8,6 +8,7 @@ import (
 	"uuid"
 
 	auditevents "audit/api/events"
+	inventoryevents "inventory/api/events"
 	"inventory/internal/inventory/domain"
 	"inventory/internal/inventory/infra/mysql"
 )
@@ -39,8 +40,28 @@ func (s *Service) CancelMealAllocation(ctx context.Context, identity domain.Allo
 		if err != nil {
 			return err
 		}
-		return s.dispatcherFactory.NewDispatcher(ctx).
-			Dispatch(&auditevents.AuditRecordRequested{ActorId: identity.ActorID.String(), Action: "allocation.cancelled", TargetType: "meal_item", TargetId: identity.ItemID.String(), MetadataJson: metadata})
+		dispatcher := s.dispatcherFactory.NewDispatcher(ctx)
+		if err := dispatcher.Dispatch(
+			&inventoryevents.AllocationCancelled{
+				PlanId:         identity.PlanID.String(),
+				ItemId:         identity.ItemID.String(),
+				Revision:       identity.Revision.String(),
+				ActorId:        identity.ActorID.String(),
+				ShoppingListId: identity.ShoppingListID.String(),
+			},
+		); err != nil {
+			return err
+		}
+		return dispatcher.
+			Dispatch(
+				&auditevents.AuditRecordRequested{
+					ActorId:      identity.ActorID.String(),
+					Action:       "allocation.cancelled",
+					TargetType:   "meal_item",
+					TargetId:     identity.ItemID.String(),
+					MetadataJson: metadata,
+				},
+			)
 	})
 	if err != nil {
 		return fmt.Errorf("cancel meal allocation: %w", err)
