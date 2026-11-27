@@ -99,6 +99,7 @@ type StockRepository interface {
 	GetByProductIDs(inventoryID uuid.UUID, productID []uuid.UUID) ([]Stock, error)
 	List(inventoryID uuid.UUID) ([]Stock, error)
 	Add(inventoryID, productID uuid.UUID, quantity int64) error
+	Replenish(operationID, inventoryID, productID uuid.UUID, quantity int64) (bool, error)
 	Remove(inventoryID, productID uuid.UUID, quantity int64) error
 	Delete(inventoryID, productID uuid.UUID) error
 }

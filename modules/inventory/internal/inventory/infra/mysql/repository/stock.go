@@ -1,6 +1,7 @@
 package repository
 
 import (
+	"bytes"
 	"context"
 	"database/sql"
 	"errors"
@@ -110,6 +111,32 @@ func (r *stockRepository) Add(inventoryID, productID uuid.UUID, quantity int64) 
 		return fmt.Errorf("add stock: %w", err)
 	}
 	return nil
+}
+
+func (r *stockRepository) Replenish(operationID, inventoryID, productID uuid.UUID, quantity int64) (bool, error) {
+	if operationID == uuid.Nil() || inventoryID == uuid.Nil() || productID == uuid.Nil() || quantity <= 0 {
+		return false, domain.ErrInvalidStock
+	}
+	_, err := r.client.ExecContext(r.ctx, "stock.replenishment.insert", `INSERT INTO stock_replenishment_operations (id, inventory_id, product_id, quantity) VALUES (?, ?, ?, ?)`, operationID[:], inventoryID[:], productID[:], quantity)
+	var mysqlErr *driver.MySQLError
+	if errors.As(err, &mysqlErr) && mysqlErr.Number == 1062 {
+		var existingInventory, existingProduct []byte
+		var existingQuantity int64
+		if err := r.client.QueryRowContext(r.ctx, "stock.replenishment.lock", `SELECT inventory_id, product_id, quantity FROM stock_replenishment_operations WHERE id = ? FOR UPDATE`, operationID[:]).Scan(&existingInventory, &existingProduct, &existingQuantity); err != nil {
+			return false, fmt.Errorf("get replenishment: %w", err)
+		}
+		if !bytes.Equal(existingInventory, inventoryID[:]) || !bytes.Equal(existingProduct, productID[:]) || existingQuantity != quantity {
+			return false, domain.ErrInvalidStock
+		}
+		return false, nil
+	}
+	if err != nil {
+		return false, fmt.Errorf("record replenishment: %w", err)
+	}
+	if err := r.Add(inventoryID, productID, quantity); err != nil {
+		return false, err
+	}
+	return true, nil
 }
 
 func (r *stockRepository) Remove(inventoryID, productID uuid.UUID, quantity int64) error {
