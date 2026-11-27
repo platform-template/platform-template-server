@@ -87,6 +87,7 @@ func TestMultipleInventoryMigrationAndReservations(t *testing.T) {
 	require.NoError(t, runner.Migrate(ctx, "event-inbox", inbox.Migrations(client)...))
 	// MySQL DDL is not transactional; an interrupted migration must be safe to retry.
 	require.NoError(t, all[3].Up(ctx))
+	require.NoError(t, all[len(all)-1].Up(ctx))
 
 	legacyID := uuid.UUID{15: 1}
 	otherID := uuid.New()

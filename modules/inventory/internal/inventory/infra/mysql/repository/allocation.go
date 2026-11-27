@@ -135,13 +135,20 @@ func (r *allocationRepository) Allocate(
 }
 func (r *allocationRepository) existing(id uuid.UUID, expected []byte) (domain.AllocationResult, bool, error) {
 	var hash, payload []byte
-	err := r.client.QueryRowContext(r.ctx, "allocation.existing", `SELECT request_hash, result FROM allocation_operations WHERE id = ? FOR UPDATE`, id[:]).
-		Scan(&hash, &payload)
+	var cancelled bool
+	err := r.client.QueryRowContext(r.ctx, "allocation.existing", `SELECT request_hash, result, cancelled FROM allocation_operations WHERE id = ? FOR UPDATE`, id[:]).
+		Scan(&hash, &payload, &cancelled)
 	if err != nil {
 		return domain.AllocationResult{}, false, fmt.Errorf("get allocation: %w", err)
 	}
+	if cancelled && len(hash) == 0 {
+		return domain.AllocationResult{}, false, domain.ErrAllocationCancelled
+	}
 	if !bytes.Equal(hash, expected) {
 		return domain.AllocationResult{}, false, domain.ErrAllocationConflict
+	}
+	if cancelled {
+		return domain.AllocationResult{}, false, domain.ErrAllocationCancelled
 	}
 	if len(payload) == 0 {
 		return domain.AllocationResult{}, false, errors.New("incomplete allocation")
@@ -162,4 +169,73 @@ func allocationReservationID(operationID, inventoryID uuid.UUID) uuid.UUID {
 	id[6] = id[6]&0x0f | 0x80
 	id[8] = id[8]&0x3f | 0x80
 	return id
+}
+
+// Cancel requires a unit of work and serializes against Allocate on the operation row.
+func (r *allocationRepository) Cancel(operationID uuid.UUID) (bool, error) {
+	if operationID == uuid.Nil() {
+		return false, domain.ErrInvalidAllocation
+	}
+	_, err := r.client.ExecContext(
+		r.ctx,
+		"allocation.cancel_marker",
+		`INSERT INTO allocation_operations (id, request_hash, result, cancelled) VALUES (?, NULL, NULL, TRUE)`,
+		operationID[:],
+	)
+	var mysqlErr *driver.MySQLError
+	if err == nil {
+		return true, nil
+	}
+	if !errors.As(err, &mysqlErr) || mysqlErr.Number != 1062 {
+		return false, fmt.Errorf("insert cancellation marker: %w", err)
+	}
+	var payload []byte
+	var cancelled bool
+	err = r.client.QueryRowContext(r.ctx, "allocation.lock_for_cancel", `SELECT result, cancelled FROM allocation_operations WHERE id = ? FOR UPDATE`, operationID[:]).
+		Scan(&payload, &cancelled)
+	if err != nil {
+		return false, fmt.Errorf("lock allocation for cancellation: %w", err)
+	}
+	if cancelled {
+		return false, nil
+	}
+	if len(payload) == 0 {
+		return false, errors.New("incomplete allocation")
+	}
+	var result domain.AllocationResult
+	if err := json.Unmarshal(payload, &result); err != nil {
+		return false, fmt.Errorf("decode allocation for cancellation: %w", err)
+	}
+	reservations := make(map[uuid.UUID]uuid.UUID)
+	for _, line := range result.Lines {
+		if existing, ok := reservations[line.InventoryID]; ok && existing != line.ReservationID {
+			return false, domain.ErrInvalidAllocation
+		}
+		if line.ReservationID != allocationReservationID(operationID, line.InventoryID) {
+			return false, domain.ErrInvalidAllocation
+		}
+		reservations[line.InventoryID] = line.ReservationID
+	}
+	inventories := make([]uuid.UUID, 0, len(reservations))
+	for inventoryID := range reservations {
+		inventories = append(inventories, inventoryID)
+	}
+	sort.Slice(inventories, func(i, j int) bool { return inventories[i].String() < inventories[j].String() })
+	for _, inventoryID := range inventories {
+		if _, err := NewReservationRepository(
+			r.ctx,
+			r.client,
+		).Release(inventoryID, reservations[inventoryID]); err != nil {
+			return false, fmt.Errorf("release allocation reservation: %w", err)
+		}
+	}
+	if _, err := r.client.ExecContext(
+		r.ctx,
+		"allocation.cancel",
+		`UPDATE allocation_operations SET cancelled = TRUE WHERE id = ?`,
+		operationID[:],
+	); err != nil {
+		return false, fmt.Errorf("cancel allocation: %w", err)
+	}
+	return true, nil
 }
