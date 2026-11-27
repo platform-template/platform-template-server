@@ -6,11 +6,16 @@ option go_package = "/.;inventoryinternalapi";
 service InventoryService {
   rpc Echo(EchoRequest) returns (EchoResponse);
   rpc GetProduct(GetProductRequest) returns (Product);
+  rpc IsInventoryOwner(IsInventoryOwnerRequest) returns (IsInventoryOwnerResponse);
   rpc GetStock(GetStockRequest) returns (Stock);
   rpc Reserve(ReserveRequest) returns (OperationResponse);
   rpc Release(ReservationRequest) returns (OperationResponse);
   rpc Consume(ReservationRequest) returns (OperationResponse);
 }
+
+// This internal operation is intended for trusted callers verifying resource ownership.
+message IsInventoryOwnerRequest { string user_id = 1; string inventory_id = 2; }
+message IsInventoryOwnerResponse { bool is_owner = 1; }
 
 message GetProductRequest { string product_id = 1; }
 message Product { string id = 1; string name = 2; string unit = 3; }

@@ -43,6 +43,25 @@ func (h handler) Echo(
 	}, nil
 }
 
+func (h handler) IsInventoryOwner(
+	ctx context.Context,
+	req *inventoryinternalapi.IsInventoryOwnerRequest,
+) (*inventoryinternalapi.IsInventoryOwnerResponse, error) {
+	userID, err := parseID(req.GetUserId())
+	if err != nil {
+		return nil, err
+	}
+	inventoryID, err := parseID(req.GetInventoryId())
+	if err != nil {
+		return nil, err
+	}
+	owner, err := h.svc.IsInventoryOwner(ctx, userID, inventoryID)
+	if err != nil {
+		return nil, h.operationError(ctx, err)
+	}
+	return &inventoryinternalapi.IsInventoryOwnerResponse{IsOwner: owner}, nil
+}
+
 func (h handler) GetProduct(
 	ctx context.Context,
 	req *inventoryinternalapi.GetProductRequest,

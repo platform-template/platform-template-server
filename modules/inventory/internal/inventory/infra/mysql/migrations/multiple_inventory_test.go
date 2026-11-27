@@ -310,6 +310,29 @@ func TestMultipleInventoryMigrationAndReservations(t *testing.T) {
 	isOwner, err = service.IsInventoryOwner(ctx, strangerID, owned.ID())
 	require.NoError(t, err)
 	require.False(t, isOwner)
+	ownership, err := grpcHandler.IsInventoryOwner(
+		ctx,
+		&internalapi.IsInventoryOwnerRequest{UserId: ownerID.String(), InventoryId: owned.ID().String()},
+	)
+	require.NoError(t, err)
+	require.True(t, ownership.GetIsOwner())
+	ownership, err = grpcHandler.IsInventoryOwner(
+		ctx,
+		&internalapi.IsInventoryOwnerRequest{UserId: strangerID.String(), InventoryId: owned.ID().String()},
+	)
+	require.NoError(t, err)
+	require.False(t, ownership.GetIsOwner())
+	ownership, err = grpcHandler.IsInventoryOwner(
+		ctx,
+		&internalapi.IsInventoryOwnerRequest{UserId: ownerID.String(), InventoryId: uuid.New().String()},
+	)
+	require.NoError(t, err)
+	require.False(t, ownership.GetIsOwner())
+	_, err = grpcHandler.IsInventoryOwner(
+		ctx,
+		&internalapi.IsInventoryOwnerRequest{UserId: "invalid", InventoryId: owned.ID().String()},
+	)
+	require.Equal(t, codes.InvalidArgument, status.Code(err))
 	var inventoryCountBefore, inventoryCountAfter int
 	require.NoError(
 		t,
