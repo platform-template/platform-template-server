@@ -39,6 +39,7 @@ func eventBinding(conf config.Env) *amqp.BindConfig {
 			"mealplanner.MealPlanningRequested",
 			"mealplanner.MealCancellationRequested",
 			"mealplanner.MealCompletionRequested",
+			"shopping.PurchaseConfirmed",
 		},
 	}
 }

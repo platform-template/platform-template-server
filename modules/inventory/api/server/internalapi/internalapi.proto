@@ -11,6 +11,7 @@ service InventoryService {
   rpc Reserve(ReserveRequest) returns (OperationResponse);
   rpc Release(ReservationRequest) returns (OperationResponse);
   rpc Consume(ReservationRequest) returns (OperationResponse);
+  rpc Replenish(ReplenishRequest) returns (OperationResponse);
 }
 
 // This internal operation is intended for trusted callers verifying resource ownership.
@@ -35,6 +36,7 @@ message ReserveRequest {
   repeated ReservationItem items = 3;
 }
 message ReservationRequest { string inventory_id = 1; string reservation_id = 2; }
+message ReplenishRequest { string operation_id = 1; string inventory_id = 2; string product_id = 3; int64 quantity = 4; }
 message OperationResponse {}
 
 message EchoRequest {

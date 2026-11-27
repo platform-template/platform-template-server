@@ -47,6 +47,54 @@ paths:
         '204': {description: Renamed}
         '400': {description: Invalid input}
         '404': {description: List not found}
+  /api/public/v1/shopping-lists/{id}/demands:
+    parameters:
+      - {name: id, in: path, required: true, schema: {type: string}}
+    post:
+      operationId: createManualDemand
+      security: [{sessionCookie: []}]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/manualDemandInput'}
+      responses:
+        '201': {description: Created, content: {application/json: {schema: {$ref: '#/components/schemas/shoppingDemand'}}}}
+        '400': {description: Invalid input}
+        '404': {description: List not found}
+    get:
+      operationId: listDemands
+      security: [{sessionCookie: []}]
+      responses:
+        '200':
+          description: Demands
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [demands]
+                properties:
+                  demands:
+                    type: array
+                    items: {$ref: '#/components/schemas/shoppingDemand'}
+        '400': {description: Invalid identifier}
+        '404': {description: List not found}
+  /api/public/v1/shopping-lists/{id}/demands/{demandId}/purchases:
+    parameters:
+      - {name: id, in: path, required: true, schema: {type: string}}
+      - {name: demandId, in: path, required: true, schema: {type: string}}
+    post:
+      operationId: confirmPurchase
+      security: [{sessionCookie: []}]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/purchaseInput'}
+      responses:
+        '202': {description: Accepted}
+        '400': {description: Invalid input}
+        '404': {description: List or demand not found}
   /api/public/v1/echo:
     post:
       operationId: echo
@@ -75,6 +123,29 @@ components:
       type: object
       required: [name]
       properties: {name: {type: string, minLength: 1, maxLength: 255}}
+    manualDemandInput:
+      type: object
+      required: [productId, quantity]
+      properties:
+        productId: {type: string}
+        quantity: {type: integer, format: int64, minimum: 1}
+    purchaseInput:
+      type: object
+      required: [operationId, inventoryId, quantity]
+      properties:
+        operationId: {type: string}
+        inventoryId: {type: string}
+        quantity: {type: integer, format: int64, minimum: 1}
+    shoppingDemand:
+      type: object
+      required: [id, productId, required, purchased, remaining, automatic]
+      properties:
+        id: {type: string}
+        productId: {type: string}
+        required: {type: integer, format: int64}
+        purchased: {type: integer, format: int64}
+        remaining: {type: integer, format: int64}
+        automatic: {type: boolean}
     echoRequest:
       type: object
       properties:

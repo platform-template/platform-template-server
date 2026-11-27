@@ -3,6 +3,7 @@ package repository
 import (
 	"bytes"
 	"context"
+	"database/sql"
 	"errors"
 	"fmt"
 	"uuid"
@@ -20,6 +21,168 @@ type demandRepository struct {
 
 func NewDemandRepository(ctx context.Context, client mysql.ClientContext) domain.DemandRepository {
 	return &demandRepository{ctx: ctx, client: client}
+}
+
+func (r *demandRepository) CreateManual(demand *domain.Demand) error {
+	data := demand.Data()
+	if data.Source != nil {
+		return domain.ErrInvalidDemand
+	}
+	_, err := r.client.ExecContext(
+		r.ctx,
+		"demand.create_manual",
+		`INSERT INTO shopping_demands (id,list_id,product_id,required,purchased,cancelled) VALUES (?, ?, ?, ?, 0, FALSE)`,
+		data.ID[:],
+		data.ListID[:],
+		data.ProductID[:],
+		data.Required,
+	)
+	if err != nil {
+		return fmt.Errorf("create manual demand: %w", err)
+	}
+	return nil
+}
+
+func (r *demandRepository) Get(listID, demandID uuid.UUID) (*domain.Demand, error) {
+	return r.get(listID, demandID, "")
+}
+
+func (r *demandRepository) List(listID uuid.UUID) ([]*domain.Demand, error) {
+	rows, err := r.client.QueryContext(
+		r.ctx,
+		"demand.list",
+		`SELECT id,product_id,required,purchased,cancelled,meal_plan_id,meal_item_id,revision FROM shopping_demands WHERE list_id = ? ORDER BY id`,
+		listID[:],
+	)
+	if err != nil {
+		return nil, fmt.Errorf("list shopping demands: %w", err)
+	}
+	defer rows.Close()
+	result := make([]*domain.Demand, 0)
+	for rows.Next() {
+		var raw, productID, planID, itemID, revision []byte
+		var required, purchased int64
+		var cancelled bool
+		if err := rows.Scan(
+			&raw,
+			&productID,
+			&required,
+			&purchased,
+			&cancelled,
+			&planID,
+			&itemID,
+			&revision,
+		); err != nil {
+			return nil, err
+		}
+		id, err := parseBinaryUUID(raw)
+		if err != nil {
+			return nil, err
+		}
+		product, err := parseBinaryUUID(productID)
+		if err != nil {
+			return nil, err
+		}
+		data := domain.DemandData{
+			ID:        id,
+			ListID:    listID,
+			ProductID: product,
+			Required:  required,
+			Purchased: purchased,
+			Cancelled: cancelled,
+		}
+		if planID != nil || itemID != nil || revision != nil {
+			plan, err := parseBinaryUUID(planID)
+			if err != nil {
+				return nil, err
+			}
+			item, err := parseBinaryUUID(itemID)
+			if err != nil {
+				return nil, err
+			}
+			rev, err := parseBinaryUUID(revision)
+			if err != nil {
+				return nil, err
+			}
+			data.Source = &domain.Source{MealPlanID: plan, MealItemID: item, Revision: rev}
+		}
+		demand, err := domain.RestoreDemand(data)
+		if err != nil {
+			return nil, err
+		}
+		result = append(result, demand)
+	}
+	return result, rows.Err()
+}
+
+func (r *demandRepository) Lock(listID, demandID uuid.UUID) (*domain.Demand, error) {
+	return r.get(listID, demandID, " FOR UPDATE")
+}
+
+func (r *demandRepository) get(listID, demandID uuid.UUID, lock string) (*domain.Demand, error) {
+	var productID []byte
+	var required, purchased int64
+	var cancelled bool
+	var planID, itemID, revision []byte
+	err := r.client.QueryRowContext(
+		r.ctx,
+		"demand.get",
+		`SELECT product_id,required,purchased,cancelled,meal_plan_id,meal_item_id,revision FROM shopping_demands WHERE id = ? AND list_id = ?`+lock,
+		demandID[:],
+		listID[:],
+	).Scan(&productID, &required, &purchased, &cancelled, &planID, &itemID, &revision)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("get shopping demand: %w", err)
+	}
+	product, err := parseBinaryUUID(productID)
+	if err != nil {
+		return nil, err
+	}
+	data := domain.DemandData{
+		ID:        demandID,
+		ListID:    listID,
+		ProductID: product,
+		Required:  required,
+		Purchased: purchased,
+		Cancelled: cancelled,
+	}
+	if planID != nil || itemID != nil || revision != nil {
+		plan, err := parseBinaryUUID(planID)
+		if err != nil {
+			return nil, err
+		}
+		item, err := parseBinaryUUID(itemID)
+		if err != nil {
+			return nil, err
+		}
+		rev, err := parseBinaryUUID(revision)
+		if err != nil {
+			return nil, err
+		}
+		data.Source = &domain.Source{MealPlanID: plan, MealItemID: item, Revision: rev}
+	}
+	return domain.RestoreDemand(data)
+}
+
+func (r *demandRepository) Update(demand *domain.Demand) error {
+	data := demand.Data()
+	_, err := r.client.ExecContext(
+		r.ctx,
+		"demand.update",
+		`UPDATE shopping_demands SET required = ?, purchased = ?, cancelled = ? WHERE id = ? AND list_id = ?`,
+		data.Required,
+		data.Purchased,
+		data.Cancelled,
+		data.ID[:],
+		data.ListID[:],
+	)
+	if err != nil {
+		return fmt.Errorf("update shopping demand: %w", err)
+	}
+	return nil
 }
 func (r *demandRepository) LockSource(listID uuid.UUID, source domain.Source) (bool, error) {
 	_, err := r.client.ExecContext(

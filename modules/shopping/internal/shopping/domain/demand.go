@@ -116,9 +116,18 @@ func (d *Demand) ApplyPurchase(purchase *Purchase) (bool, error) {
 }
 
 type DemandRepository interface {
+	CreateManual(*Demand) error
+	List(listID uuid.UUID) ([]*Demand, error)
+	Get(listID, demandID uuid.UUID) (*Demand, error)
+	Lock(listID, demandID uuid.UUID) (*Demand, error)
+	Update(*Demand) error
 	LockSource(listID uuid.UUID, source Source) (bool, error)
 	CancelSource(listID uuid.UUID, source Source) (bool, error)
 	RegisterAllocation(revision uuid.UUID, hash [32]byte) (bool, error)
 	CreateAutomatic(*Demand) (bool, error)
 	ListBySource(listID uuid.UUID, source Source) ([]*Demand, error)
+}
+
+type PurchaseRepository interface {
+	Create(listID uuid.UUID, purchase *Purchase) (bool, error)
 }

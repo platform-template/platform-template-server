@@ -161,6 +161,28 @@ func (h handler) Consume(
 	return &inventoryinternalapi.OperationResponse{}, nil
 }
 
+func (h handler) Replenish(
+	ctx context.Context,
+	req *inventoryinternalapi.ReplenishRequest,
+) (*inventoryinternalapi.OperationResponse, error) {
+	operationID, err := parseID(req.GetOperationId())
+	if err != nil {
+		return nil, err
+	}
+	inventoryID, err := parseID(req.GetInventoryId())
+	if err != nil {
+		return nil, err
+	}
+	productID, err := parseID(req.GetProductId())
+	if err != nil {
+		return nil, err
+	}
+	if err := h.svc.ReplenishStock(ctx, operationID, inventoryID, productID, req.GetQuantity()); err != nil {
+		return nil, h.operationError(ctx, err)
+	}
+	return &inventoryinternalapi.OperationResponse{}, nil
+}
+
 func parseID(value string) (uuid.UUID, error) {
 	id, err := uuid.Parse(value)
 	if err != nil || id == uuid.Nil() {

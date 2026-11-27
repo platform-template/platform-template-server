@@ -31,6 +31,7 @@ func newDispatcher(
 		"inventory.AllocationConsumed",
 	)
 	domainevent.DeclareSubscriber(connection, conf.AMQP.ShoppingQueue, "inventory.AllocationCompleted")
+	domainevent.DeclareSubscriber(connection, conf.AMQP.ShoppingQueue, "inventory.StockAdjusted")
 	domainevent.DeclareSubscriber(connection, conf.AMQP.AuditQueue, "*.AuditRecordRequested")
 
 	// Declare the durable queue before publishing, even if the consumer is offline.

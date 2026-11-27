@@ -14,3 +14,12 @@ message ShortagesCancelled {
  string actor_id = 4;
  string shopping_list_id = 5;
 }
+message PurchaseConfirmed {
+ string purchase_id = 1;
+ string shopping_list_id = 2;
+ string demand_id = 3;
+ string product_id = 4;
+ string inventory_id = 5;
+ int64 quantity = 6;
+ string actor_id = 7;
+}

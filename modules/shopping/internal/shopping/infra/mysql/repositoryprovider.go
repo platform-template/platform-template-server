@@ -30,3 +30,7 @@ func (p *RepositoryProvider) List(ctx context.Context) domain.ListRepository {
 func (p *RepositoryProvider) Demand(ctx context.Context) domain.DemandRepository {
 	return repository.NewDemandRepository(ctx, p.client)
 }
+
+func (p *RepositoryProvider) Purchase(ctx context.Context) domain.PurchaseRepository {
+	return repository.NewPurchaseRepository(ctx, p.client)
+}

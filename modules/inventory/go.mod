@@ -26,6 +26,7 @@ require (
 	google.golang.org/protobuf v1.36.12
 	mealplanner v0.0.0
 	session v0.0.0
+	shopping v0.0.0
 )
 
 require (
@@ -99,3 +100,5 @@ replace session => ../session
 replace audit => ../audit
 
 replace mealplanner => ../mealplanner
+
+replace shopping => ../shopping

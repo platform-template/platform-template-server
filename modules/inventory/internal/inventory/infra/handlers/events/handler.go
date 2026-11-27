@@ -10,6 +10,7 @@ import (
 	"inventory/internal/inventory/app"
 	"inventory/internal/inventory/domain"
 	mealplannerevents "mealplanner/api/events"
+	shoppingevents "shopping/api/events"
 
 	"github.com/distributed-programming-2026/go-sdk/pkg/event"
 )
@@ -20,6 +21,7 @@ type allocator interface {
 	AllocateMeal(context.Context, app.MealAllocation) error
 	CancelMealAllocation(context.Context, domain.AllocationIdentity) error
 	CompleteMealAllocation(context.Context, domain.AllocationIdentity) error
+	ReplenishStock(context.Context, uuid.UUID, uuid.UUID, uuid.UUID, int64) error
 }
 type handler struct {
 	logger    *slog.Logger
@@ -50,6 +52,9 @@ func (h *handler) Handle(ctx context.Context, envelope event.Envelope) error {
 	}
 	if envelope.Producer() == mealPlannerProducer && envelope.Type() == "MealCompletionRequested" {
 		return h.complete(ctx, envelope)
+	}
+	if envelope.Producer() == "shopping" && envelope.Type() == "PurchaseConfirmed" {
+		return h.replenish(ctx, envelope)
 	}
 	if envelope.Producer() != mealPlannerProducer || envelope.Type() != "MealPlanningRequested" {
 		return fmt.Errorf("unsupported event %s.%s", envelope.Producer(), envelope.Type())
@@ -100,6 +105,33 @@ func (h *handler) Handle(ctx context.Context, envelope event.Envelope) error {
 		request.Items = append(request.Items, domain.ReservationItem{ProductID: id, Quantity: line.GetQuantity()})
 	}
 	return h.allocator.AllocateMeal(ctx, request)
+}
+
+func (h *handler) replenish(ctx context.Context, envelope event.Envelope) error {
+	var payload shoppingevents.PurchaseConfirmed
+	if err := envelope.UnmarshalPayload(&payload); err != nil {
+		return err
+	}
+	purchaseID, err := eventID(payload.PurchaseId)
+	if err != nil {
+		return err
+	}
+	inventoryID, err := eventID(payload.InventoryId)
+	if err != nil {
+		return err
+	}
+	productID, err := eventID(payload.ProductId)
+	if err != nil {
+		return err
+	}
+	actorID, err := eventID(payload.ActorId)
+	if err != nil {
+		return err
+	}
+	if payload.Quantity <= 0 {
+		return fmt.Errorf("invalid purchase quantity")
+	}
+	return h.allocator.ReplenishStock(app.WithActor(ctx, actorID), purchaseID, inventoryID, productID, payload.Quantity)
 }
 
 func (h *handler) complete(ctx context.Context, envelope event.Envelope) error {
