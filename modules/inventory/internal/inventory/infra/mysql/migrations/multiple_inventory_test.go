@@ -393,6 +393,9 @@ func TestMultipleInventoryMigrationAndReservations(t *testing.T) {
 	testPublicHTTP(t, service, client, ownerID, strangerID, legacyID, owned.ID(), productID)
 	testReservationEvents(t, service, client, otherID, productID)
 	testPartialAllocation(t, service, unit)
+	t.Run("additional allocation", func(t *testing.T) {
+		testAdditionalAllocation(t, service, unit)
+	})
 	testMealInbox(t, service, unit, client)
 	t.Run("purchase inbox rollback and retry", func(t *testing.T) {
 		testPurchaseInbox(t, service, unit, client)

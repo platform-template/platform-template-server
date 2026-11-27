@@ -18,11 +18,13 @@ type AllocationLine struct {
 	InventoryID   uuid.UUID
 	ProductID     uuid.UUID
 	Quantity      int64
+	BatchVersion  uint64
 }
 
 type AllocationResult struct {
-	Lines     []AllocationLine
-	Shortages []ReservationItem
+	Lines         []AllocationLine
+	Shortages     []ReservationItem
+	ResultVersion uint64
 }
 
 // DistributePartial deterministically allocates available stock in inventory order.
@@ -108,11 +110,19 @@ type AllocationIdentity struct {
 
 type AllocationRepository interface {
 	BindIdentity(identity AllocationIdentity) error
-	Cancel(operationID uuid.UUID) (bool, error)
-	Consume(operationID uuid.UUID) (bool, error)
+
 	Allocate(
 		operationID uuid.UUID,
 		inventoryIDs []uuid.UUID,
 		requirements []ReservationItem,
 	) (AllocationResult, bool, error)
+
+	Extend(
+		operationID uuid.UUID,
+		inventoryIDs []uuid.UUID,
+		requirements []ReservationItem,
+	) (AllocationResult, bool, error)
+
+	Cancel(operationID uuid.UUID) (bool, error)
+	Consume(operationID uuid.UUID) (bool, error)
 }

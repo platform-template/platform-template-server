@@ -88,6 +88,35 @@ type allocationRequest struct {
 	Requirements []domain.ReservationItem
 }
 
+func canonicalAllocationRequest(
+	inventoryIDs []uuid.UUID,
+	requirements []domain.ReservationItem,
+) (allocationRequest, [32]byte, error) {
+	if _, err := domain.DistributePartial(inventoryIDs, requirements, nil); err != nil {
+		return allocationRequest{}, [32]byte{}, err
+	}
+
+	request := allocationRequest{
+		Inventories:  append([]uuid.UUID(nil), inventoryIDs...),
+		Requirements: append([]domain.ReservationItem(nil), requirements...),
+	}
+
+	sort.Slice(request.Inventories, func(i, j int) bool {
+		return request.Inventories[i].String() < request.Inventories[j].String()
+	})
+
+	sort.Slice(request.Requirements, func(i, j int) bool {
+		return request.Requirements[i].ProductID.String() < request.Requirements[j].ProductID.String()
+	})
+
+	encoded, err := json.Marshal(request)
+	if err != nil {
+		return allocationRequest{}, [32]byte{}, err
+	}
+
+	return request, sha256.Sum256(encoded), nil
+}
+
 func (r *allocationRepository) Allocate(
 	operationID uuid.UUID,
 	inventoryIDs []uuid.UUID,
@@ -96,25 +125,12 @@ func (r *allocationRepository) Allocate(
 	if operationID == uuid.Nil() {
 		return domain.AllocationResult{}, false, domain.ErrInvalidAllocation
 	}
-	if _, err := domain.DistributePartial(inventoryIDs, requirements, nil); err != nil {
-		return domain.AllocationResult{}, false, err
-	}
-	request := allocationRequest{
-		Inventories:  append([]uuid.UUID(nil), inventoryIDs...),
-		Requirements: append([]domain.ReservationItem(nil), requirements...),
-	}
-	sort.Slice(
-		request.Inventories,
-		func(i, j int) bool { return request.Inventories[i].String() < request.Inventories[j].String() },
-	)
-	sort.Slice(request.Requirements, func(i, j int) bool {
-		return request.Requirements[i].ProductID.String() < request.Requirements[j].ProductID.String()
-	})
-	encoded, err := json.Marshal(request)
+
+	request, hash, err := canonicalAllocationRequest(inventoryIDs, requirements)
 	if err != nil {
 		return domain.AllocationResult{}, false, err
 	}
-	hash := sha256.Sum256(encoded)
+
 	_, err = r.client.ExecContext(
 		r.ctx,
 		"allocation.insert",
@@ -122,6 +138,7 @@ func (r *allocationRepository) Allocate(
 		operationID[:],
 		hash[:],
 	)
+
 	var mysqlErr *driver.MySQLError
 	if errors.As(err, &mysqlErr) && mysqlErr.Number == 1062 {
 		return r.existing(operationID, hash[:])
@@ -129,45 +146,56 @@ func (r *allocationRepository) Allocate(
 	if err != nil {
 		return domain.AllocationResult{}, false, fmt.Errorf("insert allocation: %w", err)
 	}
-	stocks := make([]domain.Stock, 0)
-	for _, inventoryID := range request.Inventories {
-		for _, item := range request.Requirements {
-			stock, err := getStock(r.ctx, r.client, inventoryID, item.ProductID, true)
-			if err != nil {
-				return domain.AllocationResult{}, false, err
-			}
-			if stock != nil {
-				stocks = append(stocks, *stock)
-			}
-		}
+
+	stocks, err := r.lockStocks(request.Inventories, request.Requirements)
+	if err != nil {
+		return domain.AllocationResult{}, false, err
 	}
+
 	result, err := domain.DistributePartial(request.Inventories, request.Requirements, stocks)
 	if err != nil {
 		return domain.AllocationResult{}, false, err
 	}
+
+	result.ResultVersion = 1
+
 	for index := range result.Lines {
-		result.Lines[index].ReservationID = allocationReservationID(operationID, result.Lines[index].InventoryID)
+		line := &result.Lines[index]
+
+		line.BatchVersion = result.ResultVersion
+		line.ReservationID = allocationReservationID(operationID, line.InventoryID)
 	}
+
 	grouped := make(map[uuid.UUID][]domain.ReservationItem)
+
 	for _, line := range result.Lines {
 		grouped[line.InventoryID] = append(
 			grouped[line.InventoryID],
-			domain.ReservationItem{ProductID: line.ProductID, Quantity: line.Quantity},
+			domain.ReservationItem{
+				ProductID: line.ProductID,
+				Quantity:  line.Quantity,
+			},
 		)
 	}
+
+	reservations := NewReservationRepository(r.ctx, r.client)
+
 	for _, inventoryID := range request.Inventories {
-		if len(grouped[inventoryID]) == 0 {
+		items := grouped[inventoryID]
+		if len(items) == 0 {
 			continue
 		}
+
 		reservation, err := domain.NewReservation(
 			allocationReservationID(operationID, inventoryID),
 			inventoryID,
-			grouped[inventoryID],
+			items,
 		)
 		if err != nil {
 			return domain.AllocationResult{}, false, err
 		}
-		created, err := NewReservationRepository(r.ctx, r.client).Reserve(reservation)
+
+		created, err := reservations.Reserve(reservation)
 		if err != nil {
 			return domain.AllocationResult{}, false, err
 		}
@@ -175,10 +203,12 @@ func (r *allocationRepository) Allocate(
 			return domain.AllocationResult{}, false, errors.New("allocation reservation already exists")
 		}
 	}
+
 	payload, err := json.Marshal(result)
 	if err != nil {
 		return domain.AllocationResult{}, false, err
 	}
+
 	_, err = r.client.ExecContext(
 		r.ctx,
 		"allocation.complete",
@@ -189,8 +219,10 @@ func (r *allocationRepository) Allocate(
 	if err != nil {
 		return domain.AllocationResult{}, false, fmt.Errorf("complete allocation: %w", err)
 	}
+
 	return result, true, nil
 }
+
 func (r *allocationRepository) existing(id uuid.UUID, expected []byte) (domain.AllocationResult, bool, error) {
 	var hash, payload []byte
 	var cancelled, consumed bool
@@ -218,8 +250,23 @@ func (r *allocationRepository) existing(id uuid.UUID, expected []byte) (domain.A
 	if err := json.Unmarshal(payload, &result); err != nil {
 		return result, false, fmt.Errorf("decode allocation: %w", err)
 	}
+	normalizeAllocationResult(&result)
+
 	return result, false, nil
 }
+
+func normalizeAllocationResult(result *domain.AllocationResult) {
+	if result.ResultVersion == 0 {
+		result.ResultVersion = 1
+	}
+
+	for index := range result.Lines {
+		if result.Lines[index].BatchVersion == 0 {
+			result.Lines[index].BatchVersion = 1
+		}
+	}
+}
+
 func allocationReservationID(operationID, inventoryID uuid.UUID) uuid.UUID {
 	var input [32]byte
 	copy(input[:16], operationID[:])
@@ -270,26 +317,15 @@ func (r *allocationRepository) Cancel(operationID uuid.UUID) (bool, error) {
 	if err := json.Unmarshal(payload, &result); err != nil {
 		return false, fmt.Errorf("decode allocation for cancellation: %w", err)
 	}
-	reservations := make(map[uuid.UUID]uuid.UUID)
-	for _, line := range result.Lines {
-		if existing, ok := reservations[line.InventoryID]; ok && existing != line.ReservationID {
-			return false, domain.ErrInvalidAllocation
-		}
-		if line.ReservationID != allocationReservationID(operationID, line.InventoryID) {
-			return false, domain.ErrInvalidAllocation
-		}
-		reservations[line.InventoryID] = line.ReservationID
+	reservations, err := allocationReservations(operationID, result)
+	if err != nil {
+		return false, err
 	}
-	inventories := make([]uuid.UUID, 0, len(reservations))
-	for inventoryID := range reservations {
-		inventories = append(inventories, inventoryID)
-	}
-	sort.Slice(inventories, func(i, j int) bool { return inventories[i].String() < inventories[j].String() })
-	for _, inventoryID := range inventories {
-		if _, err := NewReservationRepository(
-			r.ctx,
-			r.client,
-		).Release(inventoryID, reservations[inventoryID]); err != nil {
+
+	repo := NewReservationRepository(r.ctx, r.client)
+
+	for _, reservation := range reservations {
+		if _, err := repo.Release(reservation.InventoryID, reservation.ReservationID); err != nil {
 			return false, fmt.Errorf("release allocation reservation: %w", err)
 		}
 	}
@@ -336,26 +372,15 @@ func (r *allocationRepository) Consume(operationID uuid.UUID) (bool, error) {
 	if len(result.Lines) == 0 || len(result.Shortages) != 0 {
 		return false, domain.ErrInvalidAllocation
 	}
-	reservations := make(map[uuid.UUID]uuid.UUID)
-	for _, line := range result.Lines {
-		if line.ReservationID != allocationReservationID(operationID, line.InventoryID) {
-			return false, domain.ErrInvalidAllocation
-		}
-		if existing, ok := reservations[line.InventoryID]; ok && existing != line.ReservationID {
-			return false, domain.ErrInvalidAllocation
-		}
-		reservations[line.InventoryID] = line.ReservationID
+	reservations, err := allocationReservations(operationID, result)
+	if err != nil {
+		return false, err
 	}
-	inventories := make([]uuid.UUID, 0, len(reservations))
-	for inventoryID := range reservations {
-		inventories = append(inventories, inventoryID)
-	}
-	sort.Slice(inventories, func(i, j int) bool { return inventories[i].String() < inventories[j].String() })
-	for _, inventoryID := range inventories {
-		if _, err := NewReservationRepository(
-			r.ctx,
-			r.client,
-		).Consume(inventoryID, reservations[inventoryID]); err != nil {
+
+	repo := NewReservationRepository(r.ctx, r.client)
+
+	for _, reservation := range reservations {
+		if _, err := repo.Consume(reservation.InventoryID, reservation.ReservationID); err != nil {
 			return false, fmt.Errorf("consume allocation reservation: %w", err)
 		}
 	}
