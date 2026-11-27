@@ -35,8 +35,8 @@ func TestInventoryUnitErrors(t *testing.T) {
 	require.ErrorIs(t, err, domain.ErrInvalidProductFilter)
 	_, err = svc.GetProduct(t.Context(), uuid.New())
 	require.ErrorIs(t, err, expected)
-	_, err = svc.GetStock(t.Context(), uuid.New())
+	_, err = svc.GetStock(t.Context(), uuid.New(), uuid.New())
 	require.ErrorIs(t, err, expected)
-	require.ErrorIs(t, svc.AddStock(t.Context(), uuid.New(), 1), expected)
-	require.ErrorIs(t, svc.Consume(t.Context(), uuid.New()), expected)
+	require.ErrorIs(t, svc.AddStock(t.Context(), uuid.New(), uuid.New(), 1), expected)
+	require.ErrorIs(t, svc.Consume(t.Context(), uuid.New(), uuid.New()), expected)
 }

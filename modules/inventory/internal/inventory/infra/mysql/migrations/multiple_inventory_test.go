@@ -4,6 +4,7 @@ package migrations_test
 
 import (
 	"context"
+	"errors"
 	"log/slog"
 	"testing"
 	"time"
@@ -15,6 +16,7 @@ import (
 	"github.com/stretchr/testify/require"
 	tcmysql "github.com/testcontainers/testcontainers-go/modules/mysql"
 
+	"inventory/internal/inventory/app"
 	"inventory/internal/inventory/domain"
 	inventorymysql "inventory/internal/inventory/infra/mysql"
 	"inventory/internal/inventory/infra/mysql/migrations"
@@ -64,6 +66,7 @@ func TestMultipleInventoryMigrationAndReservations(t *testing.T) {
 	legacyID := uuid.UUID{15: 1}
 	otherID := uuid.New()
 	unit := uow.NewUnitOfWork(mysql.NewConnectionPool(client), inventorymysql.NewRepositoryProvider)
+	service := app.NewService(unit, nil)
 	execute := func(fn func(*inventorymysql.RepositoryProvider, context.Context) error) error {
 		opCtx, done := context.WithCancel(ctx)
 		defer done()
@@ -189,6 +192,42 @@ func TestMultipleInventoryMigrationAndReservations(t *testing.T) {
 		require.Nil(t, reservation)
 		return nil
 	}))
+	rollback := errors.New("roll back outer transaction")
+	opCtx, done := context.WithCancel(ctx)
+	err = unit.ExecuteWithRepositoryProvider(opCtx, func(_ *inventorymysql.RepositoryProvider) error {
+		if err := service.AddStock(opCtx, otherID, productID, 7); err != nil {
+			return err
+		}
+		return rollback
+	})
+	done()
+	require.ErrorIs(t, err, rollback)
+	require.NoError(t, execute(func(p *inventorymysql.RepositoryProvider, c context.Context) error {
+		stock, err := p.Stock(c).GetByProductID(otherID, productID)
+		require.NoError(t, err)
+		require.EqualValues(t, 20, stock.Quantity)
+		return nil
+	}))
+	newInventory, err := service.CreateInventory(ctx, "Шкаф")
+	require.NoError(t, err)
+	require.NoError(t, service.RenameInventory(ctx, newInventory.ID(), "Буфет"))
+	loaded, err := service.GetInventory(ctx, newInventory.ID())
+	require.NoError(t, err)
+	require.Equal(t, "Буфет", loaded.Name())
+	stock, err := service.GetStock(ctx, newInventory.ID(), productID)
+	require.NoError(t, err)
+	require.Nil(t, stock)
+	require.NoError(t, service.CreateStock(ctx, newInventory.ID(), productID))
+	require.ErrorIs(t, service.CreateStock(ctx, newInventory.ID(), productID), domain.ErrStockExists)
+	stock, err = service.GetStock(ctx, newInventory.ID(), productID)
+	require.NoError(t, err)
+	require.NotNil(t, stock)
+	require.Zero(t, stock.Quantity)
+	require.NoError(t, service.AddStock(ctx, newInventory.ID(), productID, 5))
+	require.NoError(t, service.RemoveStock(ctx, newInventory.ID(), productID, 2))
+	stock, err = service.GetStock(ctx, newInventory.ID(), productID)
+	require.NoError(t, err)
+	require.EqualValues(t, 3, stock.Quantity)
 }
 
 func TestCleanMigrationDoesNotCreateDefaultInventory(t *testing.T) {

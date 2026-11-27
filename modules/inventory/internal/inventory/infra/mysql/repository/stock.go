@@ -34,6 +34,10 @@ func (r *stockRepository) Create(stock domain.Stock) error {
 	_, err := r.client.ExecContext(r.ctx, "stock.create", `INSERT INTO stocks
 		(inventory_id, product_id, quantity, reserved_quantity) VALUES (?, ?, ?, ?)`,
 		stock.InventoryID[:], stock.ProductID[:], stock.Quantity, stock.ReservedQuantity)
+	var mysqlErr *driver.MySQLError
+	if errors.As(err, &mysqlErr) && mysqlErr.Number == 1062 {
+		return domain.ErrStockExists
+	}
 	if err != nil {
 		return fmt.Errorf("create stock: %w", err)
 	}

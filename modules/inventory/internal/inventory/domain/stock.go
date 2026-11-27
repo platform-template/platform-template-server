@@ -8,6 +8,7 @@ import (
 
 var (
 	ErrInvalidStock            = errors.New("invalid stock")
+	ErrStockExists             = errors.New("stock already exists")
 	ErrInsufficientStock       = errors.New("insufficient stock")
 	ErrInvalidQuantityToRemove = errors.New("invalid quantity to remove")
 )
