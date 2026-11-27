@@ -116,6 +116,8 @@ func (d *Demand) ApplyPurchase(purchase *Purchase) (bool, error) {
 }
 
 type DemandRepository interface {
+	LockSource(listID uuid.UUID, source Source) (bool, error)
+	CancelSource(listID uuid.UUID, source Source) (bool, error)
 	RegisterAllocation(revision uuid.UUID, hash [32]byte) (bool, error)
 	CreateAutomatic(*Demand) (bool, error)
 	ListBySource(listID uuid.UUID, source Source) ([]*Demand, error)

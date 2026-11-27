@@ -48,6 +48,10 @@ func (s *Service) RecordShortages(ctx context.Context, result AllocationResult) 
 		if list == nil {
 			return domain.ErrListNotFound
 		}
+		cancelled, err := p.Demand(ctx).LockSource(result.ListID, result.Source)
+		if err != nil || cancelled {
+			return err
+		}
 		registered, err := p.Demand(ctx).RegisterAllocation(result.Source.Revision, hash)
 		if err != nil || !registered {
 			return err
@@ -92,7 +96,7 @@ func (s *Service) RecordShortages(ctx context.Context, result AllocationResult) 
 			return err
 		}
 		return s.dispatcherFactory.NewDispatcher(ctx).
-			Dispatch(&auditevents.AuditRecordRequested{ActorId: result.ActorID.String(), Action: "shopping_list.shortages_added", TargetType: "shopping_list", TargetId: result.ListID.String(), MetadataJson: metadata})
+			Dispatch(&auditevents.AuditRecordRequested{ActorId: result.ActorID.String(), Action: "shopping_list.shortages_added", TargetType: auditListTarget, TargetId: result.ListID.String(), MetadataJson: metadata})
 	})
 	if err != nil {
 		return fmt.Errorf("record shortages: %w", err)

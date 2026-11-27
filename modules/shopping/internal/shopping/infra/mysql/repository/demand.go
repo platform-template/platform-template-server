@@ -21,6 +21,61 @@ type demandRepository struct {
 func NewDemandRepository(ctx context.Context, client mysql.ClientContext) domain.DemandRepository {
 	return &demandRepository{ctx: ctx, client: client}
 }
+func (r *demandRepository) LockSource(listID uuid.UUID, source domain.Source) (bool, error) {
+	_, err := r.client.ExecContext(
+		r.ctx,
+		"demand.ensure_source",
+		`INSERT INTO shopping_source_states (revision,list_id,meal_plan_id,meal_item_id,cancelled) VALUES (?, ?, ?, ?, FALSE) ON DUPLICATE KEY UPDATE revision = revision`,
+		source.Revision[:],
+		listID[:],
+		source.MealPlanID[:],
+		source.MealItemID[:],
+	)
+	if err != nil {
+		return false, fmt.Errorf("ensure demand source: %w", err)
+	}
+	var storedList, storedPlan, storedItem []byte
+	var cancelled bool
+	err = r.client.QueryRowContext(r.ctx, "demand.lock_source", `SELECT list_id,meal_plan_id,meal_item_id,cancelled FROM shopping_source_states WHERE revision = ? FOR UPDATE`, source.Revision[:]).
+		Scan(&storedList, &storedPlan, &storedItem, &cancelled)
+	if err != nil {
+		return false, fmt.Errorf("lock demand source: %w", err)
+	}
+	if !bytes.Equal(storedList, listID[:]) || !bytes.Equal(storedPlan, source.MealPlanID[:]) ||
+		!bytes.Equal(storedItem, source.MealItemID[:]) {
+		return false, domain.ErrDemandConflict
+	}
+	return cancelled, nil
+}
+func (r *demandRepository) CancelSource(listID uuid.UUID, source domain.Source) (bool, error) {
+	cancelled, err := r.LockSource(listID, source)
+	if err != nil || cancelled {
+		return false, err
+	}
+	_, err = r.client.ExecContext(
+		r.ctx,
+		"demand.cancel_source",
+		`UPDATE shopping_demands SET cancelled = TRUE WHERE list_id = ? AND meal_plan_id = ? AND meal_item_id = ? AND revision = ? AND cancelled = FALSE`,
+		listID[:],
+		source.MealPlanID[:],
+		source.MealItemID[:],
+		source.Revision[:],
+	)
+	if err != nil {
+		return false, fmt.Errorf("cancel source demands: %w", err)
+	}
+	_, err = r.client.ExecContext(
+		r.ctx,
+		"demand.cancel_marker",
+		`UPDATE shopping_source_states SET cancelled = TRUE WHERE revision = ?`,
+		source.Revision[:],
+	)
+	if err != nil {
+		return false, fmt.Errorf("mark demand source cancelled: %w", err)
+	}
+	return true, nil
+}
+
 func (r *demandRepository) RegisterAllocation(revision uuid.UUID, hash [32]byte) (bool, error) {
 	_, err := r.client.ExecContext(
 		r.ctx,

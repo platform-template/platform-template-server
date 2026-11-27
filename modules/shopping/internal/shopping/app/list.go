@@ -12,6 +12,8 @@ import (
 	"shopping/internal/shopping/infra/mysql"
 )
 
+const auditListTarget = "shopping_list"
+
 func (s *Service) recordListAudit(ctx context.Context, actor uuid.UUID, plan *domain.List, action string) error {
 	if s.dispatcherFactory == nil {
 		return errors.New("event dispatcher is not configured")
@@ -23,7 +25,7 @@ func (s *Service) recordListAudit(ctx context.Context, actor uuid.UUID, plan *do
 	return s.dispatcherFactory.NewDispatcher(ctx).Dispatch(&auditevents.AuditRecordRequested{
 		ActorId:      actor.String(),
 		Action:       action,
-		TargetType:   "shopping_list",
+		TargetType:   auditListTarget,
 		TargetId:     plan.ID().String(),
 		MetadataJson: metadata,
 	})
