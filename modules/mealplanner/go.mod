@@ -24,7 +24,9 @@ require (
 	google.golang.org/grpc v1.84.0
 	google.golang.org/protobuf v1.36.12
 	inventory v0.0.0
+	recipes v0.0.0
 	session v0.0.0
+	shopping v0.0.0
 )
 
 require (
@@ -96,3 +98,7 @@ replace audit => ../audit
 replace session => ../session
 
 replace inventory => ../inventory
+
+replace recipes => ../recipes
+
+replace shopping => ../shopping
