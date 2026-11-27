@@ -15,9 +15,13 @@ import (
 	"github.com/distributed-programming-2026/go-sdk/pkg/uow"
 	"github.com/stretchr/testify/require"
 	tcmysql "github.com/testcontainers/testcontainers-go/modules/mysql"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 
+	internalapi "inventory/api/server/internalapi"
 	"inventory/internal/inventory/app"
 	"inventory/internal/inventory/domain"
+	internalhandler "inventory/internal/inventory/infra/handlers/internalapi"
 	inventorymysql "inventory/internal/inventory/infra/mysql"
 	"inventory/internal/inventory/infra/mysql/migrations"
 )
@@ -228,6 +232,33 @@ func TestMultipleInventoryMigrationAndReservations(t *testing.T) {
 	stock, err = service.GetStock(ctx, newInventory.ID(), productID)
 	require.NoError(t, err)
 	require.EqualValues(t, 3, stock.Quantity)
+	grpc := internalhandler.NewHandler(service, slog.Default())
+	response, err := grpc.GetStock(ctx, &internalapi.GetStockRequest{
+		InventoryId: newInventory.ID().String(), ProductId: productID.String(),
+	})
+	require.NoError(t, err)
+	require.True(t, response.Exists)
+	require.EqualValues(t, 3, response.Available)
+	reservation := &internalapi.ReserveRequest{
+		InventoryId: newInventory.ID().String(), ReservationId: uuid.New().String(),
+		Items: []*internalapi.ReservationItem{{ProductId: productID.String(), Quantity: 2}},
+	}
+	_, err = grpc.Reserve(ctx, reservation)
+	require.NoError(t, err)
+	_, err = grpc.Reserve(ctx, reservation)
+	require.NoError(t, err)
+	_, err = grpc.Consume(ctx, &internalapi.ReservationRequest{
+		InventoryId: newInventory.ID().String(), ReservationId: reservation.ReservationId,
+	})
+	require.NoError(t, err)
+	_, err = grpc.Reserve(ctx, reservation)
+	require.Equal(t, codes.FailedPrecondition, status.Code(err))
+	_, err = grpc.GetStock(ctx, &internalapi.GetStockRequest{InventoryId: "invalid", ProductId: productID.String()})
+	require.Equal(t, codes.InvalidArgument, status.Code(err))
+	_, err = grpc.Release(ctx, &internalapi.ReservationRequest{
+		InventoryId: uuid.New().String(), ReservationId: uuid.New().String(),
+	})
+	require.Equal(t, codes.NotFound, status.Code(err))
 }
 
 func TestCleanMigrationDoesNotCreateDefaultInventory(t *testing.T) {

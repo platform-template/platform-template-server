@@ -255,6 +255,9 @@ func (s *Service) Reserve(ctx context.Context, inventoryID, id uuid.UUID, items 
 		return err
 	}
 	err = s.unit.ExecuteWithRepositoryProvider(ctx, func(p *mysql.RepositoryProvider) error {
+		if err := requireInventory(ctx, p, inventoryID); err != nil {
+			return err
+		}
 		return p.Reservation(ctx).Reserve(reservation)
 	})
 	if err != nil {
@@ -265,6 +268,9 @@ func (s *Service) Reserve(ctx context.Context, inventoryID, id uuid.UUID, items 
 
 func (s *Service) Release(ctx context.Context, inventoryID, id uuid.UUID) error {
 	err := s.unit.ExecuteWithRepositoryProvider(ctx, func(p *mysql.RepositoryProvider) error {
+		if err := requireInventory(ctx, p, inventoryID); err != nil {
+			return err
+		}
 		return p.Reservation(ctx).Release(inventoryID, id)
 	})
 	if err != nil {
@@ -275,10 +281,24 @@ func (s *Service) Release(ctx context.Context, inventoryID, id uuid.UUID) error 
 
 func (s *Service) Consume(ctx context.Context, inventoryID, id uuid.UUID) error {
 	err := s.unit.ExecuteWithRepositoryProvider(ctx, func(p *mysql.RepositoryProvider) error {
+		if err := requireInventory(ctx, p, inventoryID); err != nil {
+			return err
+		}
 		return p.Reservation(ctx).Consume(inventoryID, id)
 	})
 	if err != nil {
 		return fmt.Errorf("consume: %w", err)
+	}
+	return nil
+}
+
+func requireInventory(ctx context.Context, p *mysql.RepositoryProvider, inventoryID uuid.UUID) error {
+	inventory, err := p.Inventory(ctx).GetByID(inventoryID)
+	if err != nil {
+		return err
+	}
+	if inventory == nil {
+		return domain.ErrInventoryNotFound
 	}
 	return nil
 }
