@@ -25,6 +25,7 @@ import (
 )
 
 var client mysql.TransactionalClient
+var testInventoryID = uuid.UUID{15: 1}
 var upgradedProductID uuid.UUID
 var upgradedReservationID uuid.UUID
 
@@ -73,31 +74,29 @@ func runTests(m *testing.M) (exitCode int) {
 		return 1
 	}
 	allMigrations := migrations.Database(client)
-	if err := runner.Migrate(ctx, "inventory", allMigrations[:len(allMigrations)-1]...); err != nil {
+	if err := runner.Migrate(ctx, "inventory", allMigrations[:3]...); err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		return 1
 	}
-	svc := newService()
-	product, err := svc.CreateProduct(ctx, "migration fixture", domain.UnitGrams)
-	if err != nil {
-		fmt.Fprintln(os.Stderr, err)
-		return 1
-	}
-	upgradedProductID = product.ID
+	upgradedProductID = uuid.New()
 	upgradedReservationID = uuid.New()
-	if err := svc.AddStock(ctx, product.ID, 10); err != nil {
-		fmt.Fprintln(os.Stderr, err)
-		return 1
-	}
-	items := []domain.ReservationItem{
+	fixtures := []struct {
+		query string
+		args  []any
+	}{
+		{`INSERT INTO products (id, name, unit) VALUES (?, 'migration fixture', 'g')`, []any{upgradedProductID[:]}},
+		{`INSERT INTO stocks (product_id, quantity, reserved_quantity) VALUES (?, 10, 4)`, []any{upgradedProductID[:]}},
+		{`INSERT INTO reservations (id, status) VALUES (?, 'active')`, []any{upgradedReservationID[:]}},
 		{
-			ProductID: product.ID,
-			Quantity:  4,
+			`INSERT INTO reservation_items (reservation_id, product_id, quantity) VALUES (?, ?, 4)`,
+			[]any{upgradedReservationID[:], upgradedProductID[:]},
 		},
 	}
-	if err := svc.Reserve(ctx, upgradedReservationID, items); err != nil {
-		fmt.Fprintln(os.Stderr, err)
-		return 1
+	for _, fixture := range fixtures {
+		if _, err := client.ExecContext(ctx, "test.migration_fixture", fixture.query, fixture.args...); err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			return 1
+		}
 	}
 	if err := runner.Migrate(ctx, "inventory", allMigrations...); err != nil {
 		fmt.Fprintln(os.Stderr, err)
@@ -108,12 +107,12 @@ func runTests(m *testing.M) (exitCode int) {
 
 func TestMigrationPreservesReservation(t *testing.T) {
 	svc := newService()
-	stock, err := svc.GetStock(t.Context(), upgradedProductID)
+	stock, err := svc.GetStock(t.Context(), testInventoryID, upgradedProductID)
 	require.NoError(t, err)
 	require.EqualValues(t, 10, stock.Quantity)
 	require.EqualValues(t, 4, stock.ReservedQuantity)
-	require.NoError(t, svc.Consume(t.Context(), upgradedReservationID))
-	stock, err = svc.GetStock(t.Context(), upgradedProductID)
+	require.NoError(t, svc.Consume(t.Context(), testInventoryID, upgradedReservationID))
+	stock, err = svc.GetStock(t.Context(), testInventoryID, upgradedProductID)
 	require.NoError(t, err)
 	require.EqualValues(t, 6, stock.Quantity)
 	require.Zero(t, stock.ReservedQuantity)
@@ -128,8 +127,8 @@ func addProduct(t *testing.T, svc *app.Service, quantity int64) uuid.UUID {
 	t.Helper()
 	product, err := svc.CreateProduct(t.Context(), "product", domain.UnitGrams)
 	require.NoError(t, err)
-	require.NoError(t, svc.AddStock(t.Context(), product.ID, quantity))
-	return product.ID
+	require.NoError(t, svc.AddStock(t.Context(), testInventoryID, product.ID(), quantity))
+	return product.ID()
 }
 
 func TestReservationLifecycle(t *testing.T) {
@@ -139,12 +138,12 @@ func TestReservationLifecycle(t *testing.T) {
 	products := repository.NewProductRepository(t.Context(), client)
 	product, err := products.GetByID(first)
 	require.NoError(t, err)
-	require.Equal(t, first, product.ID)
+	require.Equal(t, first, product.ID())
 	allProducts, err := products.List(domain.ProductFilter{Limit: 20})
 	require.NoError(t, err)
 	require.GreaterOrEqual(t, len(allProducts), 2)
 	stocks := repository.NewStockRepository(t.Context(), client)
-	allStocks, err := stocks.GetByProductIDs([]uuid.UUID{first, second})
+	allStocks, err := stocks.GetByProductIDs(testInventoryID, []uuid.UUID{first, second})
 	require.NoError(t, err)
 	require.Len(t, allStocks, 2)
 	id := uuid.New()
@@ -158,9 +157,9 @@ func TestReservationLifecycle(t *testing.T) {
 			Quantity:  3,
 		},
 	}
-	require.NoError(t, svc.Reserve(t.Context(), id, items))
-	require.NoError(t, svc.Reserve(t.Context(), id, items))
-	stock, err := stocks.GetByProductID(first)
+	require.NoError(t, svc.Reserve(t.Context(), testInventoryID, id, items))
+	require.NoError(t, svc.Reserve(t.Context(), testInventoryID, id, items))
+	stock, err := stocks.GetByProductID(testInventoryID, first)
 	require.NoError(t, err)
 	require.EqualValues(t, 7, stock.ReservedQuantity)
 	other := []domain.ReservationItem{
@@ -169,19 +168,19 @@ func TestReservationLifecycle(t *testing.T) {
 			Quantity:  1,
 		},
 	}
-	require.ErrorIs(t, svc.Reserve(t.Context(), id, other), domain.ErrReservationConflict)
-	require.NoError(t, svc.Release(t.Context(), id))
-	require.NoError(t, svc.Release(t.Context(), id))
-	stock, err = stocks.GetByProductID(first)
+	require.ErrorIs(t, svc.Reserve(t.Context(), testInventoryID, id, other), domain.ErrReservationConflict)
+	require.NoError(t, svc.Release(t.Context(), testInventoryID, id))
+	require.NoError(t, svc.Release(t.Context(), testInventoryID, id))
+	stock, err = stocks.GetByProductID(testInventoryID, first)
 	require.NoError(t, err)
 	require.EqualValues(t, 10, stock.Quantity)
 	require.Zero(t, stock.ReservedQuantity)
-	require.ErrorIs(t, svc.Reserve(t.Context(), id, items), domain.ErrReservationCancelled)
+	require.ErrorIs(t, svc.Reserve(t.Context(), testInventoryID, id, items), domain.ErrReservationCancelled)
 
 	cancelled := uuid.New()
-	require.NoError(t, svc.Release(t.Context(), cancelled))
-	require.ErrorIs(t, svc.Reserve(t.Context(), cancelled, items), domain.ErrReservationCancelled)
-	reservation, err := repository.NewReservationRepository(t.Context(), client).GetByID(cancelled)
+	require.NoError(t, svc.Release(t.Context(), testInventoryID, cancelled))
+	require.ErrorIs(t, svc.Reserve(t.Context(), testInventoryID, cancelled, items), domain.ErrReservationCancelled)
+	reservation, err := repository.NewReservationRepository(t.Context(), client).GetByID(testInventoryID, cancelled)
 	require.NoError(t, err)
 	require.Equal(t, domain.ReservationCancelled, reservation.Status())
 }
@@ -204,14 +203,14 @@ func TestInsufficientRollsBackAll(t *testing.T) {
 			Quantity:  11,
 		},
 	}
-	require.ErrorIs(t, svc.Reserve(t.Context(), id, items), domain.ErrInsufficientStock)
+	require.ErrorIs(t, svc.Reserve(t.Context(), testInventoryID, id, items), domain.ErrInsufficientStock)
 	stocks := repository.NewStockRepository(t.Context(), client)
 	for _, productID := range []uuid.UUID{first, second} {
-		stock, err := stocks.GetByProductID(productID)
+		stock, err := stocks.GetByProductID(testInventoryID, productID)
 		require.NoError(t, err)
 		require.Zero(t, stock.ReservedQuantity)
 	}
-	reservation, err := repository.NewReservationRepository(t.Context(), client).GetByID(id)
+	reservation, err := repository.NewReservationRepository(t.Context(), client).GetByID(testInventoryID, id)
 	require.NoError(t, err)
 	require.Nil(t, reservation)
 }
@@ -227,19 +226,19 @@ func TestConcurrentReleaseAndReserve(t *testing.T) {
 		},
 	}
 	results := make(chan error, 2)
-	go func() { results <- svc.Reserve(context.Background(), id, items) }()
-	go func() { results <- svc.Release(context.Background(), id) }()
+	go func() { results <- svc.Reserve(testOperationContext(), testInventoryID, id, items) }()
+	go func() { results <- svc.Release(testOperationContext(), testInventoryID, id) }()
 	for range 2 {
 		err := <-results
 		if err != nil {
 			require.ErrorIs(t, err, domain.ErrReservationCancelled)
 		}
 	}
-	stock, err := repository.NewStockRepository(t.Context(), client).GetByProductID(productID)
+	stock, err := repository.NewStockRepository(t.Context(), client).GetByProductID(testInventoryID, productID)
 	require.NoError(t, err)
 	require.EqualValues(t, 10, stock.Quantity)
 	require.Zero(t, stock.ReservedQuantity)
-	reservation, err := repository.NewReservationRepository(t.Context(), client).GetByID(id)
+	reservation, err := repository.NewReservationRepository(t.Context(), client).GetByID(testInventoryID, id)
 	require.NoError(t, err)
 	require.Equal(t, domain.ReservationCancelled, reservation.Status())
 }
@@ -273,7 +272,7 @@ func TestConcurrentReservations(t *testing.T) {
 					if index == 1 {
 						items[0], items[1] = items[1], items[0]
 					}
-					results <- svc.Reserve(context.Background(), ids[index], items)
+					results <- svc.Reserve(testOperationContext(), testInventoryID, ids[index], items)
 				}()
 			}
 			group.Wait()
@@ -297,11 +296,17 @@ func TestConcurrentReservations(t *testing.T) {
 			}
 			stocks := repository.NewStockRepository(t.Context(), client)
 			for _, productID := range []uuid.UUID{first, second} {
-				stock, err := stocks.GetByProductID(productID)
+				stock, err := stocks.GetByProductID(testInventoryID, productID)
 				require.NoError(t, err)
 				require.EqualValues(t, 7, stock.ReservedQuantity)
 				require.EqualValues(t, 3, stock.Available())
 			}
 		})
 	}
+}
+
+type operationContextKey struct{}
+
+func testOperationContext() context.Context {
+	return context.WithValue(context.Background(), operationContextKey{}, uuid.New())
 }

@@ -1,7 +1,6 @@
 package persistence_tests
 
 import (
-	"context"
 	"errors"
 	"sync"
 	"testing"
@@ -61,9 +60,9 @@ func TestProductSearch(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, first, 1)
 	require.Len(t, second, 1)
-	require.NotEqual(t, first[0].ID, second[0].ID)
-	require.Equal(t, "Молоко", first[0].Name)
-	require.Equal(t, "Молоко кокосовое", second[0].Name)
+	require.NotEqual(t, first[0].ID(), second[0].ID())
+	require.Equal(t, "Молоко", first[0].Name())
+	require.Equal(t, "Молоко кокосовое", second[0].Name())
 }
 
 func TestConsumeLifecycle(t *testing.T) {
@@ -81,23 +80,23 @@ func TestConsumeLifecycle(t *testing.T) {
 			Quantity:  4,
 		},
 	}
-	require.NoError(t, svc.Reserve(t.Context(), id, items))
-	require.NoError(t, svc.Consume(t.Context(), id))
-	require.NoError(t, svc.Consume(t.Context(), id))
-	require.ErrorIs(t, svc.Release(t.Context(), id), domain.ErrReservationConsumed)
-	require.ErrorIs(t, svc.Reserve(t.Context(), id, items), domain.ErrReservationConsumed)
-	stock, err := svc.GetStock(t.Context(), first)
+	require.NoError(t, svc.Reserve(t.Context(), testInventoryID, id, items))
+	require.NoError(t, svc.Consume(t.Context(), testInventoryID, id))
+	require.NoError(t, svc.Consume(t.Context(), testInventoryID, id))
+	require.ErrorIs(t, svc.Release(t.Context(), testInventoryID, id), domain.ErrReservationConsumed)
+	require.ErrorIs(t, svc.Reserve(t.Context(), testInventoryID, id, items), domain.ErrReservationConsumed)
+	stock, err := svc.GetStock(t.Context(), testInventoryID, first)
 	require.NoError(t, err)
 	require.EqualValues(t, 3, stock.Quantity)
 	require.Zero(t, stock.ReservedQuantity)
-	stock, err = svc.GetStock(t.Context(), second)
+	stock, err = svc.GetStock(t.Context(), testInventoryID, second)
 	require.NoError(t, err)
 	require.EqualValues(t, 16, stock.Quantity)
 	require.Zero(t, stock.ReservedQuantity)
-	require.ErrorIs(t, svc.Consume(t.Context(), uuid.New()), domain.ErrReservationNotFound)
+	require.ErrorIs(t, svc.Consume(t.Context(), testInventoryID, uuid.New()), domain.ErrReservationNotFound)
 	cancelled := uuid.New()
-	require.NoError(t, svc.Release(t.Context(), cancelled))
-	require.ErrorIs(t, svc.Consume(t.Context(), cancelled), domain.ErrReservationCancelled)
+	require.NoError(t, svc.Release(t.Context(), testInventoryID, cancelled))
+	require.ErrorIs(t, svc.Consume(t.Context(), testInventoryID, cancelled), domain.ErrReservationCancelled)
 }
 
 func TestConcurrentConsume(t *testing.T) {
@@ -112,18 +111,18 @@ func TestConcurrentConsume(t *testing.T) {
 					Quantity:  7,
 				},
 			}
-			require.NoError(t, svc.Reserve(t.Context(), id, items))
+			require.NoError(t, svc.Reserve(t.Context(), testInventoryID, id, items))
 			results := make(chan error, 2)
 			var group sync.WaitGroup
 			group.Add(2)
-			go func() { defer group.Done(); results <- svc.Consume(context.Background(), id) }()
+			go func() { defer group.Done(); results <- svc.Consume(testOperationContext(), testInventoryID, id) }()
 			go func() {
 				defer group.Done()
 				if release {
-					results <- svc.Release(context.Background(), id)
+					results <- svc.Release(testOperationContext(), testInventoryID, id)
 					return
 				}
-				results <- svc.Consume(context.Background(), id)
+				results <- svc.Consume(testOperationContext(), testInventoryID, id)
 			}()
 			group.Wait()
 			close(results)
@@ -135,7 +134,7 @@ func TestConcurrentConsume(t *testing.T) {
 					)
 				}
 			}
-			stock, err := svc.GetStock(t.Context(), productID)
+			stock, err := svc.GetStock(t.Context(), testInventoryID, productID)
 			require.NoError(t, err)
 			require.Zero(t, stock.ReservedQuantity)
 			if !release {
@@ -165,7 +164,7 @@ func TestConsumeRollsBackAllStocks(t *testing.T) {
 			Quantity:  4,
 		},
 	}
-	require.NoError(t, svc.Reserve(t.Context(), id, items))
+	require.NoError(t, svc.Reserve(t.Context(), testInventoryID, id, items))
 	_, err := client.ExecContext(
 		t.Context(),
 		"test.corrupt_reservation_item",
@@ -174,8 +173,8 @@ func TestConsumeRollsBackAllStocks(t *testing.T) {
 		second[:],
 	)
 	require.NoError(t, err)
-	require.ErrorIs(t, svc.Consume(t.Context(), id), domain.ErrInvalidStock)
-	stock, err := svc.GetStock(t.Context(), first)
+	require.ErrorIs(t, svc.Consume(t.Context(), testInventoryID, id), domain.ErrInvalidStock)
+	stock, err := svc.GetStock(t.Context(), testInventoryID, first)
 	require.NoError(t, err)
 	require.EqualValues(t, 10, stock.Quantity)
 	require.EqualValues(t, 3, stock.ReservedQuantity)
@@ -186,12 +185,12 @@ func TestConcurrentAddStock(t *testing.T) {
 	productID := addProduct(t, svc, 1)
 	results := make(chan error, 8)
 	for range 8 {
-		go func() { results <- svc.AddStock(context.Background(), productID, 2) }()
+		go func() { results <- svc.AddStock(testOperationContext(), testInventoryID, productID, 2) }()
 	}
 	for range 8 {
 		require.NoError(t, <-results)
 	}
-	stock, err := svc.GetStock(t.Context(), productID)
+	stock, err := svc.GetStock(t.Context(), testInventoryID, productID)
 	require.NoError(t, err)
 	require.EqualValues(t, 17, stock.Quantity)
 }
@@ -206,17 +205,17 @@ func TestConcurrentReserveAndConsume(t *testing.T) {
 			Quantity:  7,
 		},
 	}
-	require.NoError(t, svc.Reserve(t.Context(), id, items))
+	require.NoError(t, svc.Reserve(t.Context(), testInventoryID, id, items))
 	reserveResult := make(chan error, 1)
 	consumeResult := make(chan error, 1)
-	go func() { reserveResult <- svc.Reserve(context.Background(), id, items) }()
-	go func() { consumeResult <- svc.Consume(context.Background(), id) }()
+	go func() { reserveResult <- svc.Reserve(testOperationContext(), testInventoryID, id, items) }()
+	go func() { consumeResult <- svc.Consume(testOperationContext(), testInventoryID, id) }()
 	err := <-reserveResult
 	if err != nil {
 		require.ErrorIs(t, err, domain.ErrReservationConsumed)
 	}
 	require.NoError(t, <-consumeResult)
-	stock, err := svc.GetStock(t.Context(), productID)
+	stock, err := svc.GetStock(t.Context(), testInventoryID, productID)
 	require.NoError(t, err)
 	require.EqualValues(t, 3, stock.Quantity)
 	require.Zero(t, stock.ReservedQuantity)

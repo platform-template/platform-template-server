@@ -28,14 +28,19 @@ type fakeSessions struct {
 	sessionapi.SessionServiceClient
 }
 
+var httpUserID = uuid.New()
+var httpAdminID = uuid.New()
+
 func (fakeSessions) ResolveSession(
 	_ context.Context,
 	req *sessionapi.ResolveSessionRequest,
 	_ ...grpc.CallOption,
 ) (*sessionapi.ResolveSessionResponse, error) {
 	switch req.GetToken() {
-	case "admin", "user", "authz-offline":
-		return &sessionapi.ResolveSessionResponse{UserId: uuid.New().String()}, nil
+	case "admin":
+		return &sessionapi.ResolveSessionResponse{UserId: httpAdminID.String()}, nil
+	case "user", "authz-offline":
+		return &sessionapi.ResolveSessionResponse{UserId: httpUserID.String()}, nil
 	case "revoked":
 		return nil, status.Error(codes.Unauthenticated, "invalid")
 	default:
@@ -113,11 +118,20 @@ func TestProductHTTP(t *testing.T) {
 	require.NotEmpty(t, product.ID)
 	code, _ = request(http.MethodGet, base+"/"+product.ID, "user", "", "")
 	require.Equal(t, 200, code)
-	code, _ = request(http.MethodGet, base+"/"+product.ID+"/stock", "user", "", "")
+	code, body = request(http.MethodPost, "/api/public/v1/inventories", "user", `{"name":"Холодильник"}`, "")
+	require.Equal(t, 201, code)
+	var inventory struct {
+		ID string `json:"id"`
+	}
+	require.NoError(t, json.Unmarshal(body, &inventory))
+	stockPath := "/api/public/v1/inventories/" + inventory.ID + "/stocks/" + product.ID
+	code, _ = request(http.MethodGet, stockPath, "user", "", "")
 	require.Equal(t, 200, code)
-	code, _ = request(http.MethodPost, base+"/"+product.ID+"/stock/add", "admin", `{"quantity":5}`, "")
+	code, _ = request(http.MethodPost, stockPath+"/add", "admin", `{"quantity":5}`, "")
+	require.Equal(t, 404, code)
+	code, _ = request(http.MethodPost, stockPath+"/add", "user", `{"quantity":5}`, "")
 	require.Equal(t, 204, code)
-	code, body = request(http.MethodGet, base+"/"+product.ID+"/stock", "user", "", "")
+	code, body = request(http.MethodGet, stockPath, "user", "", "")
 	require.Equal(t, 200, code)
 	var stock struct {
 		Quantity  int64 `json:"quantity"`
@@ -126,7 +140,7 @@ func TestProductHTTP(t *testing.T) {
 	require.NoError(t, json.Unmarshal(body, &stock))
 	require.EqualValues(t, 5, stock.Quantity)
 	require.EqualValues(t, 5, stock.Available)
-	code, _ = request(http.MethodPost, base+"/"+product.ID+"/stock/add", "admin", `{"quantity":0}`, "")
+	code, _ = request(http.MethodPost, stockPath+"/add", "user", `{"quantity":0}`, "")
 	require.Equal(t, 400, code)
 	code, _ = request(http.MethodGet, base+"/bad", "user", "", "")
 	require.Equal(t, 400, code)

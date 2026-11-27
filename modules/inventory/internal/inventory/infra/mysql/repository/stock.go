@@ -18,6 +18,8 @@ type stockRepository struct {
 	client mysql.ClientContext
 }
 
+const forUpdate = ` FOR UPDATE`
+
 func NewStockRepository(ctx context.Context, client mysql.ClientContext) domain.StockRepository {
 	return &stockRepository{ctx: ctx, client: client}
 }
@@ -160,7 +162,7 @@ func getStock(
 ) (*domain.Stock, error) {
 	query := `SELECT quantity, reserved_quantity FROM stocks WHERE inventory_id = ? AND product_id = ?`
 	if lock {
-		query += ` FOR UPDATE`
+		query += forUpdate
 	}
 	var quantity, reserved int64
 	err := client.QueryRowContext(ctx, "stock.get", query, inventoryID[:], productID[:]).Scan(&quantity, &reserved)

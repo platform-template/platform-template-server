@@ -39,7 +39,7 @@ func (r *reservationRepository) GetByID(inventoryID, id uuid.UUID) (*domain.Rese
 func (r *reservationRepository) get(id uuid.UUID, lock bool) (*domain.Reservation, error) {
 	query := `SELECT inventory_id, status FROM reservations WHERE id = ?`
 	if lock {
-		query += ` FOR UPDATE`
+		query += forUpdate
 	}
 	var status string
 	var inventoryBytes []byte
@@ -60,10 +60,15 @@ func (r *reservationRepository) get(id uuid.UUID, lock bool) (*domain.Reservatio
 	}
 	var inventoryID uuid.UUID
 	copy(inventoryID[:], inventoryBytes)
+	itemsQuery := `SELECT product_id, quantity FROM reservation_items WHERE reservation_id = ? ORDER BY product_id`
+	if lock {
+		// A consistent read may predate the transaction that inserted the reservation.
+		itemsQuery += forUpdate
+	}
 	rows, err := r.client.QueryContext(
 		r.ctx,
 		"reservation.items",
-		`SELECT product_id, quantity FROM reservation_items WHERE reservation_id = ? ORDER BY product_id`,
+		itemsQuery,
 		id[:],
 	)
 	if err != nil {
