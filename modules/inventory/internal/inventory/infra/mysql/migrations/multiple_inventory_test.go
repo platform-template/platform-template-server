@@ -389,6 +389,7 @@ func TestMultipleInventoryMigrationAndReservations(t *testing.T) {
 
 	testPublicHTTP(t, service, client, ownerID, strangerID, legacyID, owned.ID(), productID)
 	testReservationEvents(t, service, client, otherID, productID)
+	testPartialAllocation(t, service, unit)
 }
 
 func testReservationEvents(

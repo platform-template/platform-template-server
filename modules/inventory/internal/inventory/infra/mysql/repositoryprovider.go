@@ -42,3 +42,7 @@ func (p *RepositoryProvider) Reservation(ctx context.Context) domain.Reservation
 func (p *RepositoryProvider) InventoryOwnership(ctx context.Context) domain.InventoryOwnership {
 	return repository.NewOwnershipRepository(ctx, p.client)
 }
+
+func (p *RepositoryProvider) Allocation(ctx context.Context) domain.AllocationRepository {
+	return repository.NewAllocationRepository(ctx, p.client)
+}
