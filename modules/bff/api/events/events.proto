@@ -1,0 +1,9 @@
+syntax = "proto3";
+package bffEvents;
+
+option go_package = "/.;bffevents";
+
+message Echo {
+  string ID = 1;
+  string Body = 2;
+}

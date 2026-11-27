@@ -1,0 +1,16 @@
+syntax = "proto3";
+package bffInternalAPI;
+
+option go_package = "/.;bffinternalapi";
+
+service BffService {
+  rpc Echo(EchoRequest) returns (EchoResponse);
+}
+
+message EchoRequest {
+  string Body = 1;
+}
+
+message EchoResponse {
+  string OperationID = 1;
+}

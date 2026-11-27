@@ -1,0 +1,83 @@
+openapi: 3.0.0
+info:
+  version: 1.0.0
+  title: Bff service public API
+  x-api-identifier: bffpublicapi
+paths:
+  /api/public/v1/bootstrap:
+    get:
+      operationId: getBootstrap
+      security: [{sessionCookie: []}]
+      responses:
+        "200":
+          description: Current authenticated user and global capabilities
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/bootstrap"}
+        "401": {description: Authentication required}
+        "503": {description: Authentication dependencies unavailable}
+  /api/public/v1/navigation:
+    get:
+      operationId: getNavigation
+      security: [{sessionCookie: []}]
+      responses:
+        "200":
+          description: Navigation allowed by global module grants
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items: {type: array, items: {$ref: "#/components/schemas/navigationItem"}}
+        "401": {description: Authentication required}
+        "503": {description: Authentication dependencies unavailable}
+  /api/public/v1/echo:
+    post:
+      operationId: echo
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/echoRequest"
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/echoResponseData"
+components:
+  securitySchemes:
+    sessionCookie: {type: apiKey, in: cookie, name: session}
+  schemas:
+    bootstrap:
+      type: object
+      required: [userId, authenticated, modules, superuser]
+      properties:
+        userId: {type: string}
+        authenticated: {type: boolean}
+        modules: {type: array, items: {type: string}}
+        superuser: {type: boolean}
+    navigationItem:
+      type: object
+      required: [id, label, path]
+      properties:
+        id: {type: string}
+        label: {type: string}
+        path: {type: string}
+    echoRequest:
+      type: object
+      properties:
+        body:
+          type: string
+      required:
+        - body
+    echoResponseData:
+      type: object
+      properties:
+        operationID:
+          type: string
+      required:
+        - operationID

@@ -5,6 +5,7 @@ use (
 	./modules/audit
 	./modules/auth
 	./modules/authz
+	./modules/bff
 	./modules/identity
 	./modules/inventory
 	./modules/mealplanner

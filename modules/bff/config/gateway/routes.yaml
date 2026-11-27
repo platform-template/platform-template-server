@@ -1,0 +1,14 @@
+kind: gateway/service/v1
+name: bff
+weight: 100
+routes:
+  - pattern: '^/bff/api/.*$'
+    rewrite:
+      old: '^/bff/(.*)$'
+      new: '/$1'
+    target: bff-service:8082
+    interceptors:
+      - id: bff-interceptor
+        processingMode:
+          requestHeaders: true
+          responseHeaders: true
