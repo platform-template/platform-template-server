@@ -6,7 +6,10 @@ import (
 	"uuid"
 )
 
-var ErrInvalidPlan = errors.New("invalid meal plan")
+var (
+	ErrInvalidPlan  = errors.New("invalid meal plan")
+	ErrPlanNotFound = errors.New("meal plan not found")
+)
 
 type Plan struct {
 	id      uuid.UUID

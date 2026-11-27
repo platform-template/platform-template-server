@@ -98,6 +98,41 @@ func NewItem(data ItemData) (*Item, error) {
 	return &Item{data: data}, nil
 }
 
+// RestoreItem validates persisted data before reconstructing its operation state.
+func RestoreItem(data ItemData) (*Item, error) {
+	item, err := NewItem(data)
+	if err != nil {
+		return nil, err
+	}
+	switch data.State {
+	case Planning:
+		if data.ReservationVersion != 0 || len(data.Shortages) != 0 {
+			return nil, ErrInvalidItem
+		}
+	case Missing:
+		if data.ReservationVersion == 0 || len(data.Shortages) == 0 {
+			return nil, ErrInvalidItem
+		}
+	case Ready, Completing, Completed:
+		if data.ReservationVersion == 0 || len(data.Shortages) != 0 {
+			return nil, ErrInvalidItem
+		}
+	case Cancelling, Cancelled, Failed:
+	default:
+		return nil, ErrInvalidItem
+	}
+	if len(data.Shortages) > 0 {
+		valid, err := item.ApplyReservation(data.Revision, 1, data.Shortages)
+		if err != nil || !valid {
+			return nil, ErrInvalidItem
+		}
+	}
+	item.data.State = data.State
+	item.data.ReservationVersion = data.ReservationVersion
+	item.data.Shortages = append([]Ingredient(nil), data.Shortages...)
+	return item, nil
+}
+
 func validIngredients(items []Ingredient) bool {
 	if len(items) == 0 {
 		return false
