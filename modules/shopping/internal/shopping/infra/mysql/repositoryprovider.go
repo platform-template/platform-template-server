@@ -26,3 +26,7 @@ func (p *RepositoryProvider) Echo(ctx context.Context) domain.EchoRepository {
 func (p *RepositoryProvider) List(ctx context.Context) domain.ListRepository {
 	return repository.NewListRepository(ctx, p.client)
 }
+
+func (p *RepositoryProvider) Demand(ctx context.Context) domain.DemandRepository {
+	return repository.NewDemandRepository(ctx, p.client)
+}

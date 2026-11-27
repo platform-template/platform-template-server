@@ -10,6 +10,7 @@ var (
 	ErrInvalidDemand   = errors.New("invalid shopping demand")
 	ErrAutomaticDemand = errors.New("automatic demand cannot be manually modified")
 	ErrInvalidPurchase = errors.New("invalid purchase")
+	ErrDemandConflict  = errors.New("shopping demand conflict")
 )
 
 type Source struct {
@@ -45,6 +46,20 @@ func NewDemand(data DemandData) (*Demand, error) {
 	}
 	return &Demand{data: data}, nil
 }
+func RestoreDemand(data DemandData) (*Demand, error) {
+	if data.Purchased < 0 {
+		return nil, ErrInvalidDemand
+	}
+	purchased, cancelled := data.Purchased, data.Cancelled
+	data.Purchased, data.Cancelled = 0, false
+	demand, err := NewDemand(data)
+	if err != nil {
+		return nil, err
+	}
+	demand.data.Purchased, demand.data.Cancelled = purchased, cancelled
+	return demand, nil
+}
+
 func (d *Demand) Data() DemandData {
 	result := d.data
 	if result.Source != nil {
@@ -98,4 +113,10 @@ func (d *Demand) ApplyPurchase(purchase *Purchase) (bool, error) {
 	d.data.Purchased += purchase.data.Quantity
 	purchase.data.Confirmed = true
 	return true, nil
+}
+
+type DemandRepository interface {
+	RegisterAllocation(revision uuid.UUID, hash [32]byte) (bool, error)
+	CreateAutomatic(*Demand) (bool, error)
+	ListBySource(listID uuid.UUID, source Source) ([]*Demand, error)
 }

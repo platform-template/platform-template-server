@@ -22,6 +22,7 @@ require (
 	golang.org/x/sync v0.22.0
 	google.golang.org/grpc v1.84.0
 	google.golang.org/protobuf v1.36.12
+	inventory v0.0.0
 )
 
 require (
@@ -88,3 +89,5 @@ require (
 replace github.com/distributed-programming-2026/lib => ../../lib
 
 replace audit => ../audit
+
+replace inventory => ../inventory

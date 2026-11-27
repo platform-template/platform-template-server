@@ -19,6 +19,7 @@ import (
 	"shopping/internal/shopping/infra/mysql/migrations"
 
 	"github.com/distributed-programming-2026/go-sdk/pkg/event"
+	"github.com/distributed-programming-2026/go-sdk/pkg/event/inbox"
 	"github.com/distributed-programming-2026/go-sdk/pkg/event/outbox"
 	"github.com/distributed-programming-2026/go-sdk/pkg/migrator"
 	"github.com/distributed-programming-2026/go-sdk/pkg/mysql"
@@ -54,6 +55,7 @@ func TestShoppingLists(t *testing.T) {
 	require.NoError(t, err)
 	require.NoError(t, runner.Migrate(ctx, "shopping", migrations.Database(client)...))
 	require.NoError(t, runner.Migrate(ctx, "event-outbox", outbox.Migrations(client)...))
+	require.NoError(t, runner.Migrate(ctx, "event-inbox", inbox.Migrations(client)...))
 	unit := uow.NewUnitOfWork(mysql.NewConnectionPool(client), shoppingdb.NewRepositoryProvider)
 	dispatcher, _, err := outbox.Decorate(
 		event.DispatcherFunc(func(context.Context, event.Envelope) error { return nil }),
@@ -113,6 +115,7 @@ func TestShoppingLists(t *testing.T) {
 	)
 	require.Equal(t, 2, count)
 	testListOwnerGRPC(t, service, owner, stranger, list.ID())
+	testShortageInbox(ctx, t, client, unit, service, owner, list.ID())
 }
 
 func testListOwnerGRPC(t *testing.T, service *app.Service, owner, stranger, list uuid.UUID) {

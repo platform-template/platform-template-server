@@ -18,4 +18,5 @@ type mysqlMigration func(client mysql.ClientContext) migrator.Migration
 var migrations = []mysqlMigration{
 	Version1791225168,
 	Version1795786855,
+	Version1795788639,
 }

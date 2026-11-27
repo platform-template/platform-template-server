@@ -71,6 +71,9 @@ func checkEcho(t *testing.T, id, body string) event.Envelope {
 	for _, row := range rows {
 		envelope, err := event.Unmarshal(row.Payload)
 		require.NoError(t, err)
+		if envelope.Producer() != "shopping" || envelope.Type() != "Echo" {
+			continue
+		}
 		var echo shoppingevents.Echo
 		err = envelope.UnmarshalPayload(&echo)
 		require.NoError(t, err)
