@@ -6,17 +6,30 @@ import (
 )
 
 type Env struct {
-	App     App     `envconfig:"app"`
-	GRPC    GRPC    `envconfig:"grpc"`
-	HTTP    HTTP    `envconfig:"http"`
-	MySQL   MySQL   `envconfig:"mysql"`
-	AMQP    AMQP    `envconfig:"amqp"`
-	Relay   Relay   `envconfig:"relay"`
-	Session Session `envconfig:"session"`
+	App       App       `envconfig:"app"`
+	GRPC      GRPC      `envconfig:"grpc"`
+	HTTP      HTTP      `envconfig:"http"`
+	MySQL     MySQL     `envconfig:"mysql"`
+	AMQP      AMQP      `envconfig:"amqp"`
+	Relay     Relay     `envconfig:"relay"`
+	Session   Session   `envconfig:"session"`
+	Inventory Inventory `envconfig:"inventory"`
+	Recipes   Recipes   `envconfig:"recipes"`
+	Shopping  Shopping  `envconfig:"shopping"`
 }
 
 type Session struct {
 	Address string `envconfig:"address" default:"session-service:8081"`
+}
+
+type Inventory struct {
+	Address string `envconfig:"address" default:"inventory-service:8081"`
+}
+type Recipes struct {
+	Address string `envconfig:"address" default:"recipes-service:8081"`
+}
+type Shopping struct {
+	Address string `envconfig:"address" default:"shopping-service:8081"`
 }
 
 type App struct {
@@ -81,7 +94,7 @@ func (c Env) Validate() error {
 	if c.MySQL.Address == "" || c.MySQL.Database == "" || c.MySQL.User == "" || c.AMQP.URL == "" ||
 		c.AMQP.Queue == "" ||
 		c.HTTP.Address == "" ||
-		c.GRPC.Address == "" || c.Session.Address == "" {
+		c.GRPC.Address == "" || c.Session.Address == "" || c.Inventory.Address == "" || c.Recipes.Address == "" || c.Shopping.Address == "" {
 		return errors.New("database, broker and server configuration must not be empty")
 	}
 	return nil

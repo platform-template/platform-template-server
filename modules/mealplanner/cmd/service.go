@@ -4,8 +4,11 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	inventoryapi "inventory/api/server/internalapi"
 	"log/slog"
+	recipesapi "recipes/api/server/internalapi"
 	sessionapi "session/api/server/internalapi"
+	shoppingapi "shopping/api/server/internalapi"
 
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
@@ -16,6 +19,9 @@ import (
 	"mealplanner/internal/mealplanner/app"
 	"mealplanner/internal/mealplanner/config"
 	eventinfra "mealplanner/internal/mealplanner/infra/event"
+	inventoryclient "mealplanner/internal/mealplanner/infra/grpc/inventory"
+	recipesclient "mealplanner/internal/mealplanner/infra/grpc/recipes"
+	shoppingclient "mealplanner/internal/mealplanner/infra/grpc/shopping"
 )
 
 func (a *application) serviceCmd() *cli.Command {
@@ -58,6 +64,29 @@ func service(ctx context.Context, logger *slog.Logger, conf config.Env) (err err
 		return fmt.Errorf("create session client: %w", err)
 	}
 	defer func() { err = errors.Join(err, sessionConn.Close()) }()
+	inventoryConn, err := grpc.NewClient(
+		conf.Inventory.Address,
+		grpc.WithTransportCredentials(insecure.NewCredentials()),
+	)
+	if err != nil {
+		return fmt.Errorf("create inventory client: %w", err)
+	}
+	defer func() { err = errors.Join(err, inventoryConn.Close()) }()
+	recipesConn, err := grpc.NewClient(conf.Recipes.Address, grpc.WithTransportCredentials(insecure.NewCredentials()))
+	if err != nil {
+		return fmt.Errorf("create recipes client: %w", err)
+	}
+	defer func() { err = errors.Join(err, recipesConn.Close()) }()
+	shoppingConn, err := grpc.NewClient(conf.Shopping.Address, grpc.WithTransportCredentials(insecure.NewCredentials()))
+	if err != nil {
+		return fmt.Errorf("create shopping client: %w", err)
+	}
+	defer func() { err = errors.Join(err, shoppingConn.Close()) }()
+	svc = app.NewPlanningService(svc, app.PlanningDependencies{
+		Inventory: inventoryclient.NewClient(inventoryapi.NewInventoryServiceClient(inventoryConn)),
+		Recipes:   recipesclient.NewClient(recipesapi.NewRecipesServiceClient(recipesConn)),
+		Shopping:  shoppingclient.NewClient(shoppingapi.NewShoppingServiceClient(shoppingConn)),
+	})
 	httpServer, err := newHTTPServer(logger, conf, svc, sessionapi.NewSessionServiceClient(sessionConn))
 	if err != nil {
 		return err
