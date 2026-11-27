@@ -19,6 +19,7 @@ type DispatcherFactory interface {
 type Service struct {
 	unit              uow.UnitOfWorkWithRepositoryProvider[*mysql.RepositoryProvider]
 	dispatcherFactory DispatcherFactory
+	planning          *PlanningDependencies
 }
 
 func NewService(

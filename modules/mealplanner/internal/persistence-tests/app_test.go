@@ -87,4 +87,5 @@ func testPlanApplication(
 	require.NoError(t, err)
 	require.Len(t, plans, 1)
 	testPlanHTTP(t, service)
+	testScheduling(ctx, t, client, unit, service, owner, plan.ID())
 }

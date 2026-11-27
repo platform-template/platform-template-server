@@ -38,12 +38,23 @@ type Ingredient struct {
 	Quantity  int64
 }
 
+type RecipeSnapshot struct {
+	RecipeID     uuid.UUID
+	Name         string
+	Description  string
+	Instructions string
+	Servings     int64
+	Ingredients  []Ingredient
+}
+
 type ItemData struct {
 	ID                 uuid.UUID
 	PlanID             uuid.UUID
 	Kind               ItemKind
 	RecipeID           uuid.UUID
 	RecipeName         string
+	RecipeDescription  string
+	RecipeInstructions string
 	Servings           int64
 	ScheduledAt        time.Time
 	Ingredients        []Ingredient

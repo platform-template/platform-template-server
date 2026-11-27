@@ -39,3 +39,17 @@ func (c *Client) CheckOwners(ctx context.Context, userID uuid.UUID, inventories 
 	}
 	return nil
 }
+
+func (c *Client) ValidateProduct(ctx context.Context, productID uuid.UUID) error {
+	if productID == uuid.Nil() {
+		return errors.New("invalid product ID")
+	}
+	response, err := c.api.GetProduct(ctx, &inventoryapi.GetProductRequest{ProductId: productID.String()})
+	if err != nil {
+		return fmt.Errorf("get inventory product: %w", err)
+	}
+	if response == nil || response.GetId() != productID.String() {
+		return errors.New("invalid product response")
+	}
+	return nil
+}

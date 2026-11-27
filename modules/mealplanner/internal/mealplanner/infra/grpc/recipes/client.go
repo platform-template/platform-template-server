@@ -13,36 +13,33 @@ import (
 
 var ErrInvalidSnapshot = errors.New("invalid recipe snapshot")
 
-type Snapshot struct {
-	RecipeID     uuid.UUID
-	Name         string
-	Description  string
-	Instructions string
-	Servings     int64
-	Ingredients  []domain.Ingredient
-}
 type Client struct {
 	api recipesapi.RecipesServiceClient
 }
 
 func NewClient(api recipesapi.RecipesServiceClient) *Client { return &Client{api: api} }
-func (c *Client) Snapshot(ctx context.Context, userID, recipeID uuid.UUID, servings int64) (Snapshot, error) {
+
+func (c *Client) Snapshot(
+	ctx context.Context,
+	userID, recipeID uuid.UUID,
+	servings int64,
+) (domain.RecipeSnapshot, error) {
 	if userID == uuid.Nil() || recipeID == uuid.Nil() || servings <= 0 {
-		return Snapshot{}, ErrInvalidSnapshot
+		return domain.RecipeSnapshot{}, ErrInvalidSnapshot
 	}
 	response, err := c.api.GetRecipeSnapshot(
 		ctx,
 		&recipesapi.GetRecipeSnapshotRequest{UserId: userID.String(), RecipeId: recipeID.String(), Servings: servings},
 	)
 	if err != nil {
-		return Snapshot{}, fmt.Errorf("get recipe snapshot: %w", err)
+		return domain.RecipeSnapshot{}, fmt.Errorf("get recipe snapshot: %w", err)
 	}
 	if response == nil || response.GetRecipeId() != recipeID.String() || response.GetServings() != servings ||
 		strings.TrimSpace(response.GetName()) == "" ||
 		len(response.GetIngredients()) == 0 {
-		return Snapshot{}, ErrInvalidSnapshot
+		return domain.RecipeSnapshot{}, ErrInvalidSnapshot
 	}
-	snapshot := Snapshot{
+	snapshot := domain.RecipeSnapshot{
 		RecipeID:     recipeID,
 		Name:         response.GetName(),
 		Description:  response.GetDescription(),
@@ -54,7 +51,7 @@ func (c *Client) Snapshot(ctx context.Context, userID, recipeID uuid.UUID, servi
 	for _, ingredient := range response.GetIngredients() {
 		id, err := uuid.Parse(ingredient.GetProductId())
 		if err != nil || id == uuid.Nil() || ingredient.GetQuantity() <= 0 || seen[id] {
-			return Snapshot{}, ErrInvalidSnapshot
+			return domain.RecipeSnapshot{}, ErrInvalidSnapshot
 		}
 		seen[id] = true
 		snapshot.Ingredients = append(
