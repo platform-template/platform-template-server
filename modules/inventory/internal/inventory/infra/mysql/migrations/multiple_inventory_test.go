@@ -42,7 +42,7 @@ func TestMultipleInventoryMigrationAndReservations(t *testing.T) {
 	runner, err := migrator.New(client, slog.Default())
 	require.NoError(t, err)
 	all := migrations.Database(client)
-	require.NoError(t, runner.Migrate(ctx, "inventory", all[:len(all)-1]...))
+	require.NoError(t, runner.Migrate(ctx, "inventory", all[:3]...))
 	productID, reservationID := uuid.New(), uuid.New()
 	_, err = client.ExecContext(ctx, "fixture.product", `INSERT INTO products VALUES (?, 'греча', 'g')`, productID[:])
 	require.NoError(t, err)
@@ -65,7 +65,7 @@ func TestMultipleInventoryMigrationAndReservations(t *testing.T) {
 	require.NoError(t, err)
 	require.NoError(t, runner.Migrate(ctx, "inventory", all...))
 	// MySQL DDL is not transactional; an interrupted migration must be safe to retry.
-	require.NoError(t, all[len(all)-1].Up(ctx))
+	require.NoError(t, all[3].Up(ctx))
 
 	legacyID := uuid.UUID{15: 1}
 	otherID := uuid.New()
@@ -259,6 +259,42 @@ func TestMultipleInventoryMigrationAndReservations(t *testing.T) {
 		InventoryId: uuid.New().String(), ReservationId: uuid.New().String(),
 	})
 	require.Equal(t, codes.NotFound, status.Code(err))
+	ownerID, strangerID := uuid.New(), uuid.New()
+	owned, err := service.CreateOwnedInventory(ctx, ownerID, "Холодильник")
+	require.NoError(t, err)
+	isOwner, err := service.IsInventoryOwner(ctx, ownerID, owned.ID())
+	require.NoError(t, err)
+	require.True(t, isOwner)
+	isOwner, err = service.IsInventoryOwner(ctx, strangerID, owned.ID())
+	require.NoError(t, err)
+	require.False(t, isOwner)
+	isOwner, err = service.IsInventoryOwner(ctx, ownerID, legacyID)
+	require.NoError(t, err)
+	require.False(t, isOwner)
+	inventories, err := service.ListOwnedInventories(ctx, ownerID)
+	require.NoError(t, err)
+	require.Len(t, inventories, 1)
+	require.Equal(t, owned.ID(), inventories[0].ID())
+	inventories, err = service.ListOwnedInventories(ctx, strangerID)
+	require.NoError(t, err)
+	require.Empty(t, inventories)
+	var rolledBackID uuid.UUID
+	opCtx, done = context.WithCancel(ctx)
+	err = unit.ExecuteWithRepositoryProvider(opCtx, func(_ *inventorymysql.RepositoryProvider) error {
+		inventory, err := service.CreateOwnedInventory(opCtx, ownerID, "Не создан")
+		if err != nil {
+			return err
+		}
+		rolledBackID = inventory.ID()
+		return rollback
+	})
+	done()
+	require.ErrorIs(t, err, rollback)
+	_, err = service.GetInventory(ctx, rolledBackID)
+	require.ErrorIs(t, err, domain.ErrInventoryNotFound)
+	isOwner, err = service.IsInventoryOwner(ctx, ownerID, rolledBackID)
+	require.NoError(t, err)
+	require.False(t, isOwner)
 }
 
 func TestCleanMigrationDoesNotCreateDefaultInventory(t *testing.T) {

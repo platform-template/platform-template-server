@@ -302,3 +302,53 @@ func requireInventory(ctx context.Context, p *mysql.RepositoryProvider, inventor
 	}
 	return nil
 }
+
+// CreateOwnedInventory stores the resource and its creator in the same transaction.
+func (s *Service) CreateOwnedInventory(ctx context.Context, userID uuid.UUID, name string) (*domain.Inventory, error) {
+	if userID == uuid.Nil() {
+		return nil, domain.ErrInvalidInventory
+	}
+	inventory, err := domain.NewInventory(uuid.New(), name)
+	if err != nil {
+		return nil, err
+	}
+	err = s.unit.ExecuteWithRepositoryProvider(ctx, func(p *mysql.RepositoryProvider) error {
+		if err := p.Inventory(ctx).Create(inventory); err != nil {
+			return err
+		}
+		return p.InventoryOwnership(ctx).Create(inventory.ID(), userID)
+	})
+	if err != nil {
+		return nil, fmt.Errorf("create owned inventory: %w", err)
+	}
+	return inventory, nil
+}
+
+func (s *Service) ListOwnedInventories(ctx context.Context, userID uuid.UUID) ([]*domain.Inventory, error) {
+	if userID == uuid.Nil() {
+		return nil, domain.ErrInvalidInventory
+	}
+	var inventories []*domain.Inventory
+	err := s.unit.ExecuteWithRepositoryProvider(ctx, func(p *mysql.RepositoryProvider) error {
+		var err error
+		inventories, err = p.InventoryOwnership(ctx).ListByUser(userID)
+		return err
+	})
+	if err != nil {
+		return nil, fmt.Errorf("list owned inventories: %w", err)
+	}
+	return inventories, nil
+}
+
+func (s *Service) IsInventoryOwner(ctx context.Context, userID, inventoryID uuid.UUID) (bool, error) {
+	var owner bool
+	err := s.unit.ExecuteWithRepositoryProvider(ctx, func(p *mysql.RepositoryProvider) error {
+		var err error
+		owner, err = p.InventoryOwnership(ctx).IsOwner(inventoryID, userID)
+		return err
+	})
+	if err != nil {
+		return false, fmt.Errorf("check inventory owner: %w", err)
+	}
+	return owner, nil
+}

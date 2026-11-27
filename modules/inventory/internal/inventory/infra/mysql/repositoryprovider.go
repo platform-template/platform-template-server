@@ -38,3 +38,7 @@ func (p *RepositoryProvider) Stock(ctx context.Context) domain.StockRepository {
 func (p *RepositoryProvider) Reservation(ctx context.Context) domain.ReservationRepository {
 	return repository.NewReservationRepository(ctx, p.client)
 }
+
+func (p *RepositoryProvider) InventoryOwnership(ctx context.Context) domain.InventoryOwnership {
+	return repository.NewOwnershipRepository(ctx, p.client)
+}

@@ -52,3 +52,10 @@ type InventoryRepository interface {
 	GetByID(uuid.UUID) (*Inventory, error)
 	List() ([]*Inventory, error)
 }
+
+// InventoryOwnership records the creator until resource grants are managed by Access.
+type InventoryOwnership interface {
+	Create(inventoryID, userID uuid.UUID) error
+	IsOwner(inventoryID, userID uuid.UUID) (bool, error)
+	ListByUser(userID uuid.UUID) ([]*Inventory, error)
+}
