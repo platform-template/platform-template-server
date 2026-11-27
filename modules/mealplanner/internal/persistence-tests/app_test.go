@@ -86,4 +86,5 @@ func testPlanApplication(
 	plans, err = service.ListPlans(ctx, owner)
 	require.NoError(t, err)
 	require.Len(t, plans, 1)
+	testPlanHTTP(t, service)
 }

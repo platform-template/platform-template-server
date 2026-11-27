@@ -4,6 +4,61 @@ info:
   title: Mealplanner service public API
   x-api-identifier: mealplannerpublicapi
 paths:
+  /api/public/v1/meal-plans:
+    get:
+      operationId: listPlans
+      security: [{sessionCookie: []}]
+      responses:
+        '200':
+          description: Plans
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [plans]
+                properties:
+                  plans: {type: array, items: {$ref: '#/components/schemas/plan'}}
+    post:
+      operationId: createPlan
+      security: [{sessionCookie: []}]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/planInput'}
+      responses:
+        '201':
+          description: Created
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/plan'}
+        '400': {description: Invalid input}
+  /api/public/v1/meal-plans/{id}:
+    parameters:
+      - {name: id, in: path, required: true, schema: {type: string}}
+    get:
+      operationId: getPlan
+      security: [{sessionCookie: []}]
+      responses:
+        '200':
+          description: Plan
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/plan'}
+        '400': {description: Invalid identifier}
+        '404': {description: Plan not found}
+    patch:
+      operationId: renamePlan
+      security: [{sessionCookie: []}]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/planInput'}
+      responses:
+        '204': {description: Renamed}
+        '400': {description: Invalid input}
+        '404': {description: Plan not found}
   /api/public/v1/echo:
     post:
       operationId: echo
@@ -21,7 +76,20 @@ paths:
               schema:
                 $ref: "#/components/schemas/echoResponseData"
 components:
+  securitySchemes:
+    sessionCookie: {type: apiKey, in: cookie, name: session}
   schemas:
+    plan:
+      type: object
+      required: [id, name]
+      properties:
+        id: {type: string}
+        name: {type: string}
+    planInput:
+      type: object
+      required: [name]
+      properties:
+        name: {type: string, minLength: 1, maxLength: 255}
     echoRequest:
       type: object
       properties:
