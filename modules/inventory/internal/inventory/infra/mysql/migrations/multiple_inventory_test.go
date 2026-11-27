@@ -14,6 +14,8 @@ import (
 	"time"
 	"uuid"
 
+	"github.com/distributed-programming-2026/go-sdk/pkg/event"
+	"github.com/distributed-programming-2026/go-sdk/pkg/event/outbox"
 	"github.com/distributed-programming-2026/go-sdk/pkg/migrator"
 	"github.com/distributed-programming-2026/go-sdk/pkg/mysql"
 	"github.com/distributed-programming-2026/go-sdk/pkg/uow"
@@ -23,11 +25,16 @@ import (
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
+	"google.golang.org/protobuf/proto"
+
+	domainevent "github.com/distributed-programming-2026/lib/event"
 
 	authzapi "authz/api/server/internalapi"
+	inventoryevents "inventory/api/events"
 	internalapi "inventory/api/server/internalapi"
 	"inventory/internal/inventory/app"
 	"inventory/internal/inventory/domain"
+	eventfactory "inventory/internal/inventory/infra/event"
 	internalhandler "inventory/internal/inventory/infra/handlers/internalapi"
 	publichandler "inventory/internal/inventory/infra/handlers/public"
 	inventorymysql "inventory/internal/inventory/infra/mysql"
@@ -73,13 +80,17 @@ func TestMultipleInventoryMigrationAndReservations(t *testing.T) {
 	)
 	require.NoError(t, err)
 	require.NoError(t, runner.Migrate(ctx, "inventory", all...))
+	require.NoError(t, runner.Migrate(ctx, "event-outbox", outbox.Migrations(client)...))
 	// MySQL DDL is not transactional; an interrupted migration must be safe to retry.
 	require.NoError(t, all[3].Up(ctx))
 
 	legacyID := uuid.UUID{15: 1}
 	otherID := uuid.New()
 	unit := uow.NewUnitOfWork(mysql.NewConnectionPool(client), inventorymysql.NewRepositoryProvider)
-	service := app.NewService(unit, nil)
+	transport := event.DispatcherFunc(func(context.Context, event.Envelope) error { return nil })
+	dispatcher, _, err := outbox.Decorate(transport, uow.NewLockableUnitOfWork(unit), outbox.Config{Transport: "test"})
+	require.NoError(t, err)
+	service := app.NewService(unit, eventfactory.NewDispatcherFactory("inventory", dispatcher))
 	execute := func(fn func(*inventorymysql.RepositoryProvider, context.Context) error) error {
 		opCtx, done := context.WithCancel(ctx)
 		defer done()
@@ -274,12 +285,41 @@ func TestMultipleInventoryMigrationAndReservations(t *testing.T) {
 	ownerID, strangerID := uuid.New(), uuid.New()
 	owned, err := service.CreateOwnedInventory(ctx, ownerID, "Холодильник")
 	require.NoError(t, err)
+	var payload []byte
+	require.NoError(
+		t,
+		client.QueryRowContext(ctx, "test.last_event", `SELECT payload FROM event_outbox ORDER BY id DESC LIMIT 1`).
+			Scan(&payload),
+	)
+	envelope, err := event.Unmarshal(payload)
+	require.NoError(t, err)
+	require.Equal(t, "InventoryCreated", envelope.Type())
+	var created inventoryevents.InventoryCreated
+	require.NoError(t, envelope.UnmarshalPayload(&created))
+	require.Equal(t, owned.ID().String(), created.InventoryId)
+	require.Equal(t, ownerID.String(), created.ActorId)
 	isOwner, err := service.IsInventoryOwner(ctx, ownerID, owned.ID())
 	require.NoError(t, err)
 	require.True(t, isOwner)
 	isOwner, err = service.IsInventoryOwner(ctx, strangerID, owned.ID())
 	require.NoError(t, err)
 	require.False(t, isOwner)
+	var inventoryCountBefore, inventoryCountAfter int
+	require.NoError(
+		t,
+		client.QueryRowContext(ctx, "test.inventory.count", `SELECT COUNT(*) FROM inventories`).
+			Scan(&inventoryCountBefore),
+	)
+	dispatchFailure := errors.New("outbox failure")
+	failingService := app.NewService(unit, failingDispatcherFactory{err: dispatchFailure})
+	_, err = failingService.CreateOwnedInventory(ctx, ownerID, "Без события")
+	require.ErrorIs(t, err, dispatchFailure)
+	require.NoError(
+		t,
+		client.QueryRowContext(ctx, "test.inventory.count", `SELECT COUNT(*) FROM inventories`).
+			Scan(&inventoryCountAfter),
+	)
+	require.Equal(t, inventoryCountBefore, inventoryCountAfter)
 	isOwner, err = service.IsInventoryOwner(ctx, ownerID, legacyID)
 	require.NoError(t, err)
 	require.False(t, isOwner)
@@ -291,6 +331,11 @@ func TestMultipleInventoryMigrationAndReservations(t *testing.T) {
 	require.NoError(t, err)
 	require.Empty(t, inventories)
 	var rolledBackID uuid.UUID
+	var eventsBefore, eventsAfter int
+	require.NoError(
+		t,
+		client.QueryRowContext(ctx, "test.count_outbox", `SELECT COUNT(*) FROM event_outbox`).Scan(&eventsBefore),
+	)
 	opCtx, done = context.WithCancel(ctx)
 	err = unit.ExecuteWithRepositoryProvider(opCtx, func(_ *inventorymysql.RepositoryProvider) error {
 		inventory, err := service.CreateOwnedInventory(opCtx, ownerID, "Не создан")
@@ -302,16 +347,36 @@ func TestMultipleInventoryMigrationAndReservations(t *testing.T) {
 	})
 	done()
 	require.ErrorIs(t, err, rollback)
+	require.NoError(
+		t,
+		client.QueryRowContext(ctx, "test.count_outbox", `SELECT COUNT(*) FROM event_outbox`).Scan(&eventsAfter),
+	)
+	require.Equal(t, eventsBefore, eventsAfter)
 	_, err = service.GetInventory(ctx, rolledBackID)
 	require.ErrorIs(t, err, domain.ErrInventoryNotFound)
 	isOwner, err = service.IsInventoryOwner(ctx, ownerID, rolledBackID)
 	require.NoError(t, err)
 	require.False(t, isOwner)
 
-	testPublicHTTP(t, service, ownerID, strangerID, legacyID, owned.ID(), productID)
+	testPublicHTTP(t, service, client, ownerID, strangerID, legacyID, owned.ID(), productID)
 }
 
-func testPublicHTTP(t *testing.T, service *app.Service, ownerID, strangerID, legacyID, ownedID, productID uuid.UUID) {
+type failingDispatcherFactory struct{ err error }
+
+func (f failingDispatcherFactory) NewDispatcher(context.Context) domainevent.Dispatcher {
+	return failingDispatcher(f)
+}
+
+type failingDispatcher struct{ err error }
+
+func (d failingDispatcher) Dispatch(proto.Message) error { return d.err }
+
+func testPublicHTTP(
+	t *testing.T,
+	service *app.Service,
+	client mysql.TransactionalClient,
+	ownerID, strangerID, legacyID, ownedID, productID uuid.UUID,
+) {
 	t.Helper()
 	router := chi.NewRouter()
 	register, err := publichandler.Register(service, slog.Default(), testSessions{users: map[string]uuid.UUID{
@@ -378,6 +443,18 @@ func testPublicHTTP(t *testing.T, service *app.Service, ownerID, strangerID, leg
 	)
 	require.Equal(t, http.StatusNotFound, request("POST", stockPath+"/add", "stranger", `{"quantity":5}`, "").Code)
 	require.Equal(t, http.StatusNoContent, request("POST", stockPath+"/add", "owner", `{"quantity":5}`, "").Code)
+	var payload []byte
+	require.NoError(
+		t,
+		client.QueryRowContext(t.Context(), "test.last_event", `SELECT payload FROM event_outbox ORDER BY id DESC LIMIT 1`).
+			Scan(&payload),
+	)
+	envelope, err := event.Unmarshal(payload)
+	require.NoError(t, err)
+	var adjusted inventoryevents.StockAdjusted
+	require.NoError(t, envelope.UnmarshalPayload(&adjusted))
+	require.Equal(t, ownerID.String(), adjusted.ActorId)
+	require.EqualValues(t, 5, adjusted.QuantityDelta)
 	httpResponse = request("GET", stockPath, "owner", "", "")
 	require.Equal(t, http.StatusOK, httpResponse.Code)
 	require.Contains(t, httpResponse.Body.String(), `"quantity":5`)

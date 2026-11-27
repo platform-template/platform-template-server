@@ -2,9 +2,11 @@ package app
 
 import (
 	"context"
+	"errors"
 	"uuid"
 
 	"github.com/distributed-programming-2026/go-sdk/pkg/uow"
+	"google.golang.org/protobuf/proto"
 
 	domainevent "github.com/distributed-programming-2026/lib/event"
 
@@ -19,6 +21,27 @@ type DispatcherFactory interface {
 type Service struct {
 	unit              uow.UnitOfWorkWithRepositoryProvider[*mysql.RepositoryProvider]
 	dispatcherFactory DispatcherFactory
+}
+
+type actorKey struct{}
+
+func WithActor(ctx context.Context, id uuid.UUID) context.Context {
+	return context.WithValue(ctx, actorKey{}, id)
+}
+
+func actorID(ctx context.Context) string {
+	id, _ := ctx.Value(actorKey{}).(uuid.UUID)
+	if id == uuid.Nil() {
+		return ""
+	}
+	return id.String()
+}
+
+func (s *Service) dispatch(ctx context.Context, message proto.Message) error {
+	if s.dispatcherFactory == nil {
+		return errors.New("inventory event dispatcher is not configured")
+	}
+	return s.dispatcherFactory.NewDispatcher(ctx).Dispatch(message)
 }
 
 func NewService(

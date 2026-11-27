@@ -11,6 +11,7 @@ import (
 	"time"
 	"uuid"
 
+	"github.com/distributed-programming-2026/go-sdk/pkg/event"
 	"github.com/distributed-programming-2026/go-sdk/pkg/migrator"
 	"github.com/distributed-programming-2026/go-sdk/pkg/mysql"
 	"github.com/distributed-programming-2026/go-sdk/pkg/uow"
@@ -19,6 +20,7 @@ import (
 
 	"inventory/internal/inventory/app"
 	"inventory/internal/inventory/domain"
+	eventfactory "inventory/internal/inventory/infra/event"
 	inventorymysql "inventory/internal/inventory/infra/mysql"
 	"inventory/internal/inventory/infra/mysql/migrations"
 	"inventory/internal/inventory/infra/mysql/repository"
@@ -120,7 +122,8 @@ func TestMigrationPreservesReservation(t *testing.T) {
 
 func newService() *app.Service {
 	unit := uow.NewUnitOfWork(mysql.NewConnectionPool(client), inventorymysql.NewRepositoryProvider)
-	return app.NewService(unit, nil)
+	dispatcher := event.DispatcherFunc(func(context.Context, event.Envelope) error { return nil })
+	return app.NewService(unit, eventfactory.NewDispatcherFactory("inventory", dispatcher))
 }
 
 func addProduct(t *testing.T, svc *app.Service, quantity int64) uuid.UUID {

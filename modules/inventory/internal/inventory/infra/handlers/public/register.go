@@ -107,7 +107,8 @@ func authorizeInventory(
 					return
 				}
 			}
-			next.ServeHTTP(w, r.WithContext(context.WithValue(r.Context(), userIDKey{}, userID)))
+			requestContext := context.WithValue(r.Context(), userIDKey{}, userID)
+			next.ServeHTTP(w, r.WithContext(app.WithActor(requestContext, userID)))
 		})
 	}
 }

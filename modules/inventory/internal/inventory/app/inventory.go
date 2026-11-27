@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"uuid"
 
+	inventoryevents "inventory/api/events"
 	"inventory/internal/inventory/domain"
 	"inventory/internal/inventory/infra/mysql"
 )
@@ -17,7 +18,12 @@ func (s *Service) CreateInventory(ctx context.Context, name string) (*domain.Inv
 		return nil, err
 	}
 	err = s.unit.ExecuteWithRepositoryProvider(ctx, func(p *mysql.RepositoryProvider) error {
-		return p.Inventory(ctx).Create(inventory)
+		if err := p.Inventory(ctx).Create(inventory); err != nil {
+			return err
+		}
+		return s.dispatch(ctx, &inventoryevents.InventoryCreated{
+			InventoryId: inventory.ID().String(), Name: inventory.Name(), ActorId: actorID(ctx),
+		})
 	})
 	if err != nil {
 		return nil, fmt.Errorf("create inventory: %w", err)
@@ -66,10 +72,19 @@ func (s *Service) RenameInventory(ctx context.Context, id uuid.UUID, name string
 		if inventory == nil {
 			return domain.ErrInventoryNotFound
 		}
+		if inventory.Name() == name {
+			return nil
+		}
 		if err := inventory.Rename(name); err != nil {
 			return err
 		}
-		return p.Inventory(ctx).Update(inventory)
+		if err := p.Inventory(ctx).Update(inventory); err != nil {
+			return err
+		}
+		return s.dispatch(
+			ctx,
+			&inventoryevents.InventoryRenamed{InventoryId: id.String(), Name: name, ActorId: actorID(ctx)},
+		)
 	})
 	if err != nil {
 		return fmt.Errorf("rename inventory: %w", err)
@@ -83,7 +98,12 @@ func (s *Service) CreateProduct(ctx context.Context, name string, unit domain.Un
 		return nil, err
 	}
 	err = s.unit.ExecuteWithRepositoryProvider(ctx, func(p *mysql.RepositoryProvider) error {
-		return p.Product(ctx).Create(&product)
+		if err := p.Product(ctx).Create(&product); err != nil {
+			return err
+		}
+		return s.dispatch(ctx, &inventoryevents.ProductCreated{
+			ProductId: product.ID().String(), Name: product.Name(), Unit: string(product.Unit()), ActorId: actorID(ctx),
+		})
 	})
 	if err != nil {
 		return nil, fmt.Errorf("create product: %w", err)
@@ -131,22 +151,32 @@ func (s *Service) GetProduct(ctx context.Context, id uuid.UUID) (*domain.Product
 
 func (s *Service) RenameProduct(ctx context.Context, id uuid.UUID, name string) error {
 	err := s.unit.ExecuteWithRepositoryProvider(ctx, func(p *mysql.RepositoryProvider) error {
-		product, err := p.Product(ctx).GetByID(id)
-		if err != nil {
-			return err
-		}
-		if product == nil {
-			return domain.ErrProductNotFound
-		}
-		if err := product.Rename(name); err != nil {
-			return err
-		}
-		return p.Product(ctx).Update(product)
+		return s.renameProduct(ctx, p, id, name)
 	})
 	if err != nil {
 		return fmt.Errorf("rename product: %w", err)
 	}
 	return nil
+}
+
+func (s *Service) renameProduct(ctx context.Context, p *mysql.RepositoryProvider, id uuid.UUID, name string) error {
+	product, err := p.Product(ctx).GetByID(id)
+	if err != nil {
+		return err
+	}
+	if product == nil {
+		return domain.ErrProductNotFound
+	}
+	if product.Name() == name {
+		return nil
+	}
+	if err := product.Rename(name); err != nil {
+		return err
+	}
+	if err := p.Product(ctx).Update(product); err != nil {
+		return err
+	}
+	return s.dispatch(ctx, &inventoryevents.ProductRenamed{ProductId: id.String(), Name: name, ActorId: actorID(ctx)})
 }
 
 func requireResources(ctx context.Context, p *mysql.RepositoryProvider, inventoryID, productID uuid.UUID) error {
@@ -211,7 +241,15 @@ func (s *Service) AddStock(ctx context.Context, inventoryID, productID uuid.UUID
 		if err := requireResources(ctx, p, inventoryID, productID); err != nil {
 			return err
 		}
-		return p.Stock(ctx).Add(inventoryID, productID, quantity)
+		if err := p.Stock(ctx).Add(inventoryID, productID, quantity); err != nil {
+			return err
+		}
+		return s.dispatch(ctx, &inventoryevents.StockAdjusted{
+			InventoryId:   inventoryID.String(),
+			ProductId:     productID.String(),
+			QuantityDelta: quantity,
+			ActorId:       actorID(ctx),
+		})
 	})
 	if err != nil {
 		return fmt.Errorf("add stock: %w", err)
@@ -228,7 +266,12 @@ func (s *Service) CreateStock(ctx context.Context, inventoryID, productID uuid.U
 		if err := requireResources(ctx, p, inventoryID, productID); err != nil {
 			return err
 		}
-		return p.Stock(ctx).Create(stock)
+		if err := p.Stock(ctx).Create(stock); err != nil {
+			return err
+		}
+		return s.dispatch(ctx, &inventoryevents.StockCreated{
+			InventoryId: inventoryID.String(), ProductId: productID.String(), ActorId: actorID(ctx),
+		})
 	})
 	if err != nil {
 		return fmt.Errorf("create stock: %w", err)
@@ -241,7 +284,15 @@ func (s *Service) RemoveStock(ctx context.Context, inventoryID, productID uuid.U
 		if err := requireResources(ctx, p, inventoryID, productID); err != nil {
 			return err
 		}
-		return p.Stock(ctx).Remove(inventoryID, productID, quantity)
+		if err := p.Stock(ctx).Remove(inventoryID, productID, quantity); err != nil {
+			return err
+		}
+		return s.dispatch(ctx, &inventoryevents.StockAdjusted{
+			InventoryId:   inventoryID.String(),
+			ProductId:     productID.String(),
+			QuantityDelta: -quantity,
+			ActorId:       actorID(ctx),
+		})
 	})
 	if err != nil {
 		return fmt.Errorf("remove stock: %w", err)
@@ -316,7 +367,12 @@ func (s *Service) CreateOwnedInventory(ctx context.Context, userID uuid.UUID, na
 		if err := p.Inventory(ctx).Create(inventory); err != nil {
 			return err
 		}
-		return p.InventoryOwnership(ctx).Create(inventory.ID(), userID)
+		if err := p.InventoryOwnership(ctx).Create(inventory.ID(), userID); err != nil {
+			return err
+		}
+		return s.dispatch(ctx, &inventoryevents.InventoryCreated{
+			InventoryId: inventory.ID().String(), Name: inventory.Name(), ActorId: userID.String(),
+		})
 	})
 	if err != nil {
 		return nil, fmt.Errorf("create owned inventory: %w", err)

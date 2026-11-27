@@ -7,3 +7,41 @@ message Echo {
   string ID = 1;
   string Body = 2;
 }
+
+message InventoryCreated {
+  string inventory_id = 1;
+  string name = 2;
+  string actor_id = 3;
+}
+
+message InventoryRenamed {
+  string inventory_id = 1;
+  string name = 2;
+  string actor_id = 3;
+}
+
+message ProductCreated {
+  string product_id = 1;
+  string name = 2;
+  string unit = 3;
+  string actor_id = 4;
+}
+
+message ProductRenamed {
+  string product_id = 1;
+  string name = 2;
+  string actor_id = 3;
+}
+
+message StockCreated {
+  string inventory_id = 1;
+  string product_id = 2;
+  string actor_id = 3;
+}
+
+message StockAdjusted {
+  string inventory_id = 1;
+  string product_id = 2;
+  int64 quantity_delta = 3;
+  string actor_id = 4;
+}
