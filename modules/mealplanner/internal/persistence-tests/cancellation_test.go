@@ -72,7 +72,29 @@ func testPurchaseRetry(
 		MealItemId:     data.ID.String(),
 		Revision:       data.Revision.String(),
 	}
-	envelope, err := event.New(ctx, "shopping", "PurchaseConfirmed", purchase)
+
+	purchaseEnvelope, err := event.New(ctx, "shopping", "PurchaseConfirmed", purchase)
+	require.NoError(t, err)
+	require.NoError(t, wrapped.Handle(ctx, purchaseEnvelope))
+
+	beforeRetry, _, err := mealdb.NewRepositoryProvider(client).
+		Item(ctx).Get(data.PlanID, data.ID)
+	require.NoError(t, err)
+	require.Equal(t, domain.Missing, beforeRetry.Data().State)
+
+	replenished := &inventoryevents.StockReplenished{
+		OperationId:    uuid.New().String(),
+		InventoryId:    inventoryID.String(),
+		ProductId:      product.String(),
+		Quantity:       1,
+		ActorId:        owner.String(),
+		ShoppingListId: data.ShoppingListID.String(),
+		MealPlanId:     data.PlanID.String(),
+		MealItemId:     data.ID.String(),
+		Revision:       data.Revision.String(),
+	}
+
+	envelope, err := event.New(ctx, "inventory", "StockReplenished", replenished)
 	require.NoError(t, err)
 	require.NoError(t, wrapped.Handle(ctx, envelope))
 	require.NoError(t, wrapped.Handle(ctx, envelope))

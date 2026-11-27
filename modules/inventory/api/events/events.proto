@@ -98,3 +98,15 @@ message AllocationConsumed {
  string actor_id = 4;
  string shopping_list_id = 5;
 }
+
+message StockReplenished {
+  string operation_id = 1;
+  string inventory_id = 2;
+  string product_id = 3;
+  int64 quantity = 4;
+  string actor_id = 5;
+  string shopping_list_id = 6;
+  string meal_plan_id = 7;
+  string meal_item_id = 8;
+  string revision = 9;
+}

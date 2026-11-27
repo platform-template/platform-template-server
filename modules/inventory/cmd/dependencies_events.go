@@ -29,6 +29,7 @@ func newDispatcher(
 		"inventory.AllocationCompleted",
 		"inventory.AllocationCancelled",
 		"inventory.AllocationConsumed",
+		"inventory.StockReplenished",
 	)
 	domainevent.DeclareSubscriber(connection, conf.AMQP.ShoppingQueue, "inventory.AllocationCompleted")
 	domainevent.DeclareSubscriber(connection, conf.AMQP.ShoppingQueue, "inventory.StockAdjusted")

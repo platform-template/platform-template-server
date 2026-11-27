@@ -56,19 +56,23 @@ func (h *handler) Handle(ctx context.Context, envelope event.Envelope) error {
 		return h.confirmConsumption(ctx, envelope)
 	case envelope.Producer() == inventoryProducer && envelope.Type() == "AllocationCompleted":
 		return h.applyAllocation(ctx, envelope)
-	case envelope.Producer() == "shopping" && envelope.Type() == "PurchaseConfirmed":
+	case envelope.Producer() == inventoryProducer && envelope.Type() == "StockReplenished":
 		return h.retryAfterPurchase(ctx, envelope)
+	case envelope.Producer() == "shopping" && envelope.Type() == "PurchaseConfirmed":
+		return nil
 	default:
 		return fmt.Errorf("unsupported event %s.%s", envelope.Producer(), envelope.Type())
 	}
 }
 
 func (h *handler) retryAfterPurchase(ctx context.Context, envelope event.Envelope) error {
-	var payload shoppingevents.PurchaseConfirmed
+	var payload inventoryevents.StockReplenished
 	if err := envelope.UnmarshalPayload(&payload); err != nil {
 		return err
 	}
-	if payload.MealPlanId == "" || payload.MealItemId == "" || payload.Revision == "" {
+	if payload.MealPlanId == "" &&
+		payload.MealItemId == "" &&
+		payload.Revision == "" {
 		return nil
 	}
 	actor, err := parseID(payload.ActorId)

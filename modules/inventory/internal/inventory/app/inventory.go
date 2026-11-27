@@ -257,40 +257,6 @@ func (s *Service) AddStock(ctx context.Context, inventoryID, productID uuid.UUID
 	return nil
 }
 
-func (s *Service) ReplenishStock(
-	ctx context.Context,
-	operationID, inventoryID, productID, actor uuid.UUID,
-	quantity int64,
-) error {
-	err := s.unit.ExecuteWithRepositoryProvider(ctx, func(p *mysql.RepositoryProvider) error {
-		if err := requireResources(ctx, p, inventoryID, productID); err != nil {
-			return err
-		}
-
-		changed, err := p.Stock(ctx).Replenish(operationID, inventoryID, productID, quantity)
-		if err != nil || !changed {
-			return err
-		}
-
-		actorID := ""
-		if actor != uuid.Nil() {
-			actorID = actor.String()
-		}
-
-		return s.dispatch(ctx, &inventoryevents.StockAdjusted{
-			InventoryId:   inventoryID.String(),
-			ProductId:     productID.String(),
-			QuantityDelta: quantity,
-			ActorId:       actorID,
-		})
-	})
-	if err != nil {
-		return fmt.Errorf("replenish stock: %w", err)
-	}
-
-	return nil
-}
-
 func (s *Service) CreateStock(ctx context.Context, inventoryID, productID uuid.UUID) error {
 	stock, err := domain.NewStock(inventoryID, productID, 0, 0)
 	if err != nil {
@@ -413,7 +379,6 @@ func requireInventory(ctx context.Context, p *mysql.RepositoryProvider, inventor
 	return nil
 }
 
-// CreateOwnedInventory stores the resource and its creator in the same transaction.
 func (s *Service) CreateOwnedInventory(ctx context.Context, userID uuid.UUID, name string) (*domain.Inventory, error) {
 	if userID == uuid.Nil() {
 		return nil, domain.ErrInvalidInventory

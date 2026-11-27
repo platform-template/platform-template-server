@@ -17,6 +17,7 @@ import (
 
 type purchaseAllocator struct {
 	ctx         context.Context
+	source      *app.MealPurchaseSource
 	operationID uuid.UUID
 	inventoryID uuid.UUID
 	productID   uuid.UUID
@@ -40,8 +41,10 @@ func (a *purchaseAllocator) ReplenishStock(
 	ctx context.Context,
 	operationID, inventoryID, productID, actorID uuid.UUID,
 	quantity int64,
+	source *app.MealPurchaseSource,
 ) error {
 	a.ctx = ctx
+	a.source = source
 	a.operationID = operationID
 	a.inventoryID = inventoryID
 	a.productID = productID
@@ -58,16 +61,24 @@ func TestPurchaseConfirmedReplenishesExactlyThePurchaseOperation(t *testing.T) {
 	inventoryID := uuid.New()
 	productID := uuid.New()
 	papichID := uuid.New()
+	shoppingListID := uuid.New()
+	planID := uuid.New()
+	itemID := uuid.New()
+	revision := uuid.New()
 
 	allocator := &purchaseAllocator{}
 	handler := NewHandler(slog.New(slog.NewTextHandler(io.Discard, nil)), allocator)
 
 	envelope, err := event.New(ctx, "shopping", "PurchaseConfirmed", &shoppingevents.PurchaseConfirmed{
-		PurchaseId:  purchaseID.String(),
-		InventoryId: inventoryID.String(),
-		ProductId:   productID.String(),
-		ActorId:     papichID.String(),
-		Quantity:    7,
+		PurchaseId:     purchaseID.String(),
+		InventoryId:    inventoryID.String(),
+		ProductId:      productID.String(),
+		ActorId:        papichID.String(),
+		Quantity:       7,
+		ShoppingListId: shoppingListID.String(),
+		MealPlanId:     planID.String(),
+		MealItemId:     itemID.String(),
+		Revision:       revision.String(),
 	})
 	require.NoError(t, err)
 
@@ -79,4 +90,30 @@ func TestPurchaseConfirmedReplenishesExactlyThePurchaseOperation(t *testing.T) {
 	require.Equal(t, papichID, allocator.actorID)
 	require.EqualValues(t, 7, allocator.quantity)
 	require.True(t, ctx == allocator.ctx, "transaction context must remain unchanged")
+
+	require.Equal(t, &app.MealPurchaseSource{
+		ShoppingListID: shoppingListID,
+		PlanID:         planID,
+		ItemID:         itemID,
+		Revision:       revision,
+	}, allocator.source)
+}
+
+func TestManualPurchaseHasNoMealSource(t *testing.T) {
+	ctx := t.Context()
+	allocator := &purchaseAllocator{}
+	handler := NewHandler(slog.New(slog.NewTextHandler(io.Discard, nil)), allocator)
+
+	envelope, err := event.New(ctx, "shopping", "PurchaseConfirmed", &shoppingevents.PurchaseConfirmed{
+		PurchaseId:  uuid.New().String(),
+		InventoryId: uuid.New().String(),
+		ProductId:   uuid.New().String(),
+		ActorId:     uuid.New().String(),
+		Quantity:    322,
+	})
+	require.NoError(t, err)
+
+	require.NoError(t, handler.Handle(ctx, envelope))
+
+	require.Nil(t, allocator.source)
 }

@@ -183,7 +183,8 @@ func (h handler) Replenish(
 		inventoryID,
 		productID,
 		uuid.Nil(),
-		req.GetQuantity()); err != nil {
+		req.GetQuantity(),
+		nil); err != nil {
 		return nil, h.operationError(ctx, err)
 	}
 	return &inventoryinternalapi.OperationResponse{}, nil

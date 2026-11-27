@@ -40,7 +40,7 @@ func eventBinding(conf config.Env) *amqp.BindConfig {
 			"inventory.AllocationCancelled",
 			"inventory.AllocationConsumed",
 			"shopping.ShortagesCancelled",
-			"shopping.PurchaseConfirmed",
+			"inventory.StockReplenished",
 		},
 	}
 }

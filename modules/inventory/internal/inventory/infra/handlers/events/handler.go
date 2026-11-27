@@ -21,7 +21,15 @@ type allocator interface {
 	AllocateMeal(context.Context, app.MealAllocation) error
 	CancelMealAllocation(context.Context, domain.AllocationIdentity) error
 	CompleteMealAllocation(context.Context, domain.AllocationIdentity) error
-	ReplenishStock(context.Context, uuid.UUID, uuid.UUID, uuid.UUID, uuid.UUID, int64) error
+	ReplenishStock(
+		context.Context,
+		uuid.UUID,
+		uuid.UUID,
+		uuid.UUID,
+		uuid.UUID,
+		int64,
+		*app.MealPurchaseSource,
+	) error
 }
 type handler struct {
 	logger    *slog.Logger
@@ -112,25 +120,36 @@ func (h *handler) replenish(ctx context.Context, envelope event.Envelope) error 
 	if err := envelope.UnmarshalPayload(&payload); err != nil {
 		return err
 	}
+
 	purchaseID, err := eventID(payload.PurchaseId)
 	if err != nil {
 		return err
 	}
+
 	inventoryID, err := eventID(payload.InventoryId)
 	if err != nil {
 		return err
 	}
+
 	productID, err := eventID(payload.ProductId)
 	if err != nil {
 		return err
 	}
+
 	actorID, err := eventID(payload.ActorId)
 	if err != nil {
 		return err
 	}
+
 	if payload.Quantity <= 0 {
 		return fmt.Errorf("invalid purchase quantity")
 	}
+
+	source, err := mealPurchaseSource(&payload)
+	if err != nil {
+		return err
+	}
+
 	return h.allocator.ReplenishStock(
 		ctx,
 		purchaseID,
@@ -138,7 +157,43 @@ func (h *handler) replenish(ctx context.Context, envelope event.Envelope) error 
 		productID,
 		actorID,
 		payload.Quantity,
+		source,
 	)
+}
+
+func mealPurchaseSource(payload *shoppingevents.PurchaseConfirmed) (*app.MealPurchaseSource, error) {
+	if payload.MealPlanId == "" &&
+		payload.MealItemId == "" &&
+		payload.Revision == "" {
+		return nil, nil
+	}
+
+	planID, err := eventID(payload.MealPlanId)
+	if err != nil {
+		return nil, err
+	}
+
+	itemID, err := eventID(payload.MealItemId)
+	if err != nil {
+		return nil, err
+	}
+
+	revision, err := eventID(payload.Revision)
+	if err != nil {
+		return nil, err
+	}
+
+	shoppingListID, err := eventID(payload.ShoppingListId)
+	if err != nil {
+		return nil, err
+	}
+
+	return &app.MealPurchaseSource{
+		ShoppingListID: shoppingListID,
+		PlanID:         planID,
+		ItemID:         itemID,
+		Revision:       revision,
+	}, nil
 }
 
 func (h *handler) complete(ctx context.Context, envelope event.Envelope) error {

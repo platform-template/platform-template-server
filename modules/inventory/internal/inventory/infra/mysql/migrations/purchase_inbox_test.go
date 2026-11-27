@@ -9,6 +9,7 @@ import (
 	"testing"
 	"uuid"
 
+	inventoryevents "inventory/api/events"
 	"inventory/internal/inventory/app"
 	"inventory/internal/inventory/domain"
 	handler "inventory/internal/inventory/infra/handlers/events"
@@ -33,6 +34,10 @@ func testPurchaseInbox(
 
 	papichID := uuid.New()
 	purchaseID := uuid.New()
+	shoppingListID := uuid.New()
+	planID := uuid.New()
+	itemID := uuid.New()
+	revision := uuid.New()
 
 	inventory, err := service.CreateOwnedInventory(ctx, papichID, "Холодос Величайшего")
 	require.NoError(t, err)
@@ -43,11 +48,15 @@ func testPurchaseInbox(
 	require.NoError(t, service.AddStock(ctx, inventory.ID(), product.ID(), 500))
 
 	envelope, err := event.New(ctx, "shopping", "PurchaseConfirmed", &shoppingevents.PurchaseConfirmed{
-		PurchaseId:  purchaseID.String(),
-		InventoryId: inventory.ID().String(),
-		ProductId:   product.ID().String(),
-		ActorId:     papichID.String(),
-		Quantity:    1000,
+		PurchaseId:     purchaseID.String(),
+		InventoryId:    inventory.ID().String(),
+		ProductId:      product.ID().String(),
+		ActorId:        papichID.String(),
+		Quantity:       1000,
+		ShoppingListId: shoppingListID.String(),
+		MealPlanId:     planID.String(),
+		MealItemId:     itemID.String(),
+		Revision:       revision.String(),
 	})
 	require.NoError(t, err)
 
@@ -123,7 +132,33 @@ func testPurchaseInbox(
 		"test.purchase.outbox_committed",
 		`SELECT COUNT(*) FROM event_outbox`,
 	).Scan(&outboxAfter))
-	require.Equal(t, outboxBefore+2, outboxAfter)
+	require.Equal(t, outboxBefore+3, outboxAfter)
+
+	var payload []byte
+	require.NoError(t, client.QueryRowContext(
+		ctx,
+		"test.purchase.replenished_event",
+		`SELECT payload FROM event_outbox ORDER BY id DESC LIMIT 1`,
+	).Scan(&payload))
+
+	replenishedEnvelope, err := event.Unmarshal(payload)
+	require.NoError(t, err)
+	require.Equal(t, "inventory", replenishedEnvelope.Producer())
+	require.Equal(t, "StockReplenished", replenishedEnvelope.Type())
+
+	var replenished inventoryevents.StockReplenished
+	require.NoError(t, replenishedEnvelope.UnmarshalPayload(&replenished))
+
+	require.Equal(t, purchaseID.String(), replenished.OperationId)
+	require.Equal(t, inventory.ID().String(), replenished.InventoryId)
+	require.Equal(t, product.ID().String(), replenished.ProductId)
+	require.Equal(t, papichID.String(), replenished.ActorId)
+	require.EqualValues(t, 1000, replenished.Quantity)
+
+	require.Equal(t, shoppingListID.String(), replenished.ShoppingListId)
+	require.Equal(t, planID.String(), replenished.MealPlanId)
+	require.Equal(t, itemID.String(), replenished.MealItemId)
+	require.Equal(t, revision.String(), replenished.Revision)
 
 	require.NoError(t, client.QueryRowContext(
 		ctx,
