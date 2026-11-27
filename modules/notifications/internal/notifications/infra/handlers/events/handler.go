@@ -2,6 +2,7 @@ package events
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	notificationsevents "notifications/api/events"
@@ -43,9 +44,17 @@ func (h *handler) Handle(ctx context.Context, envelope event.Envelope) error {
 	if err != nil || userID == uuid.Nil() {
 		return fmt.Errorf("invalid notification user ID %q", payload.UserId)
 	}
+	input := app.CreateNotificationInput{UserID: userID, Kind: payload.Kind, Title: payload.Title, Body: payload.Body}
+	if payload.IdempotencyKey != "" {
+		key := payload.IdempotencyKey
+		input.IdempotencyKey = &key
+	}
 	_, err = h.creator.CreateNotification(
 		ctx,
-		app.CreateNotificationInput{UserID: userID, Kind: payload.Kind, Title: payload.Title, Body: payload.Body},
+		input,
 	)
+	if errors.Is(err, domain.ErrDuplicate) {
+		return nil
+	}
 	return err
 }

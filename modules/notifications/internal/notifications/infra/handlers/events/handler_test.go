@@ -36,14 +36,24 @@ func TestNotificationRequest(t *testing.T) {
 		"new-service",
 		"NotificationRequested",
 		&notificationsevents.NotificationRequested{
-			UserId: userID.String(), Kind: "anything.happened", Title: "Title", Body: "Body",
+			UserId:         userID.String(),
+			Kind:           "anything.happened",
+			Title:          "Title",
+			Body:           "Body",
+			IdempotencyKey: "meal:ready",
 		},
 	)
 	require.NoError(t, err)
 	require.NoError(t, NewHandler(slog.Default(), creator).Handle(t.Context(), envelope))
 	require.Equal(
 		t,
-		app.CreateNotificationInput{UserID: userID, Kind: "anything.happened", Title: "Title", Body: "Body"},
+		app.CreateNotificationInput{
+			UserID:         userID,
+			Kind:           "anything.happened",
+			Title:          "Title",
+			Body:           "Body",
+			IdempotencyKey: stringPtr("meal:ready"),
+		},
 		creator.input,
 	)
 	invalid, err := event.New(
@@ -56,3 +66,5 @@ func TestNotificationRequest(t *testing.T) {
 	require.Error(t, NewHandler(slog.Default(), creator).Handle(t.Context(), invalid))
 	require.Equal(t, 1, creator.calls)
 }
+
+func stringPtr(value string) *string { return &value }

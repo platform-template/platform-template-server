@@ -119,10 +119,20 @@ func (s *Service) ConfirmCompletion(ctx context.Context, input CompletionConfirm
 		if err != nil {
 			return err
 		}
-		return s.dispatcherFactory.NewDispatcher(ctx).Dispatch(&auditevents.AuditRecordRequested{
+		if err := s.dispatcherFactory.NewDispatcher(ctx).Dispatch(&auditevents.AuditRecordRequested{
 			ActorId: input.ActorID.String(), Action: "meal_item.completed", TargetType: auditMealItemTarget,
 			TargetId: input.ItemID.String(), MetadataJson: metadata,
-		})
+		}); err != nil {
+			return err
+		}
+		return s.notify(
+			ctx,
+			input.ActorID,
+			"meal_item.completed",
+			"Блюдо отмечено готовым",
+			"Ингредиенты списаны из инвентаря.",
+			input.Revision.String()+":completed",
+		)
 	})
 	if err != nil {
 		return fmt.Errorf("confirm meal completion: %w", err)

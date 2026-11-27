@@ -71,8 +71,33 @@ func (s *Service) ApplyAllocation(ctx context.Context, result AllocationResult) 
 		if err != nil {
 			return err
 		}
-		return s.dispatcherFactory.NewDispatcher(ctx).
-			Dispatch(&auditevents.AuditRecordRequested{ActorId: result.ActorID.String(), Action: "meal_item.allocation_updated", TargetType: auditMealItemTarget, TargetId: result.ItemID.String(), MetadataJson: metadata})
+		if err := s.dispatcherFactory.NewDispatcher(ctx).Dispatch(&auditevents.AuditRecordRequested{
+			ActorId:      result.ActorID.String(),
+			Action:       "meal_item.allocation_updated",
+			TargetType:   auditMealItemTarget,
+			TargetId:     result.ItemID.String(),
+			MetadataJson: metadata,
+		}); err != nil {
+			return err
+		}
+		if len(result.Shortages) == 0 {
+			return s.notify(
+				ctx,
+				result.ActorID,
+				"meal_item.ready",
+				"Блюдо готово к приготовлению",
+				"Все ингредиенты зарезервированы.",
+				result.Revision.String()+":ready",
+			)
+		}
+		return s.notify(
+			ctx,
+			result.ActorID,
+			"meal_item.shortage_detected",
+			"Не хватает ингредиентов",
+			"Недостающие ингредиенты добавлены в список покупок.",
+			result.Revision.String()+":shortage",
+		)
 	})
 	if err != nil {
 		return fmt.Errorf("apply meal allocation: %w", err)

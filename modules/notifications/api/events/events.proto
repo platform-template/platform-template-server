@@ -14,4 +14,5 @@ message NotificationRequested {
   string kind = 2;
   string title = 3;
   string body = 4;
+  string idempotency_key = 5;
 }
