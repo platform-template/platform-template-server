@@ -294,7 +294,7 @@ func TestMultipleInventoryMigrationAndReservations(t *testing.T) {
 	var payload []byte
 	require.NoError(
 		t,
-		client.QueryRowContext(ctx, "test.last_event", `SELECT payload FROM event_outbox ORDER BY id DESC LIMIT 1`).
+		client.QueryRowContext(ctx, "test.last_event", `SELECT payload FROM event_outbox ORDER BY id DESC LIMIT 1 OFFSET 1`).
 			Scan(&payload),
 	)
 	envelope, err := event.Unmarshal(payload)
@@ -535,7 +535,7 @@ func testPublicHTTP(
 	var payload []byte
 	require.NoError(
 		t,
-		client.QueryRowContext(t.Context(), "test.last_event", `SELECT payload FROM event_outbox ORDER BY id DESC LIMIT 1`).
+		client.QueryRowContext(t.Context(), "test.last_event", `SELECT payload FROM event_outbox ORDER BY id DESC LIMIT 1 OFFSET 1`).
 			Scan(&payload),
 	)
 	envelope, err := event.Unmarshal(payload)

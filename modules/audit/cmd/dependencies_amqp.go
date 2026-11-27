@@ -34,17 +34,6 @@ func eventBinding(conf config.Env) *amqp.BindConfig {
 	return &amqp.BindConfig{
 		QueueName:    conf.AMQP.Queue,
 		ExchangeName: event.DomainExchange().Name,
-		RoutingKeys: []string{
-			appID + ".Echo",
-			"inventory.InventoryCreated",
-			"inventory.InventoryRenamed",
-			"inventory.ProductCreated",
-			"inventory.ProductRenamed",
-			"inventory.StockCreated",
-			"inventory.StockAdjusted",
-			"inventory.ReservationCreated",
-			"inventory.ReservationCancelled",
-			"inventory.ReservationConsumed",
-		},
+		RoutingKeys:  []string{appID + ".Echo", "*.AuditRecordRequested"},
 	}
 }

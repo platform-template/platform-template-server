@@ -16,13 +16,12 @@ import (
 	"github.com/stretchr/testify/require"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
-	"google.golang.org/protobuf/proto"
 
 	domainevent "github.com/distributed-programming-2026/lib/event"
 
+	auditcontract "audit/api/events"
 	internalapi "audit/api/server/internalapi"
 	publicapi "audit/api/server/publicapi"
-	inventoryevents "inventory/api/events"
 )
 
 func TestHTTPAndGRPCDelivery(t *testing.T) {
@@ -71,72 +70,38 @@ func TestHTTPAndGRPCDelivery(t *testing.T) {
 	require.Equal(t, 1, testEnv.logs.count("echo received", "echo_id", response.JSON200.OperationID))
 }
 
-func TestInventoryEventIsAuditedOnce(t *testing.T) {
+func TestGenericEventIsAuditedOnce(t *testing.T) {
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
-	connection := amqp.NewConnection(moduleID, amqp.ConnectionConfig{
-		URL: testEnv.conf.AMQP.URL, ConnectTimeout: time.Second,
-	}, logger)
+	connection := amqp.NewConnection(
+		moduleID,
+		amqp.ConnectionConfig{URL: testEnv.conf.AMQP.URL, ConnectTimeout: time.Second},
+		logger,
+	)
 	defer func() { require.NoError(t, connection.Stop()) }()
 	dispatcher, err := eventamqp.NewDispatcher(connection.Producer(domainevent.DomainExchange(), nil, nil))
 	require.NoError(t, err)
 	require.NoError(t, connection.Start())
-	actor, inventoryID := uuid.New(), uuid.New()
-	envelope, err := event.New(t.Context(), "inventory", "InventoryCreated", &inventoryevents.InventoryCreated{
-		InventoryId: inventoryID.String(), Name: "Морозилка", ActorId: actor.String(),
-	})
-	require.NoError(t, err)
-	require.NoError(t, dispatcher.Dispatch(t.Context(), envelope))
-	require.NoError(t, dispatcher.Dispatch(t.Context(), envelope))
-	waitHandled(t, envelope, 2)
-	var action, target, correlation string
-	var actorBytes []byte
-	err = testEnv.connector.TransactionalClient().QueryRowContext(t.Context(), "test.audit.event",
-		`SELECT action, target_id, correlation_id, actor_id FROM audit_entries WHERE event_id = ?`, envelope.ID(),
-	).Scan(&action, &target, &correlation, &actorBytes)
-	require.NoError(t, err)
-	require.Equal(t, "inventory.created", action)
-	require.Equal(t, inventoryID.String(), target)
-	require.Equal(t, envelope.CorrelationID(), correlation)
-	require.Equal(t, actor[:], actorBytes)
-}
-
-func TestReservationEventsAreAudited(t *testing.T) {
-	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
-	connection := amqp.NewConnection(moduleID, amqp.ConnectionConfig{
-		URL: testEnv.conf.AMQP.URL, ConnectTimeout: time.Second,
-	}, logger)
-	defer func() { require.NoError(t, connection.Stop()) }()
-	dispatcher, err := eventamqp.NewDispatcher(connection.Producer(domainevent.DomainExchange(), nil, nil))
-	require.NoError(t, err)
-	require.NoError(t, connection.Start())
-	inventoryID, reservationID, otherID, productID := uuid.New(), uuid.New(), uuid.New(), uuid.New()
-	events := []struct {
-		name, action string
-		target       string
-		payload      proto.Message
-	}{
-		{"ReservationCreated", "reservation.created", reservationID.String(), &inventoryevents.ReservationCreated{
-			InventoryId: inventoryID.String(), ReservationId: reservationID.String(),
-			Items: []*inventoryevents.ReservationLine{{ProductId: productID.String(), Quantity: 2}},
-		}},
-		{"ReservationCancelled", "reservation.cancelled", reservationID.String(), &inventoryevents.ReservationCancelled{
-			InventoryId: inventoryID.String(), ReservationId: reservationID.String(),
-		}},
-		{"ReservationConsumed", "reservation.consumed", otherID.String(), &inventoryevents.ReservationConsumed{
-			InventoryId: inventoryID.String(), ReservationId: otherID.String(),
-		}},
-	}
-	for _, item := range events {
-		envelope, err := event.New(t.Context(), "inventory", item.name, item.payload)
+	for _, producer := range []string{"first-service", "new-service"} {
+		actor, target := uuid.New(), uuid.New()
+		envelope, err := event.New(t.Context(), producer, "AuditRecordRequested", &auditcontract.AuditRecordRequested{
+			ActorId:      actor.String(),
+			Action:       "arbitrary.action",
+			TargetType:   "object",
+			TargetId:     target.String(),
+			MetadataJson: []byte(`{}`),
+		})
 		require.NoError(t, err)
 		require.NoError(t, dispatcher.Dispatch(t.Context(), envelope))
-		waitHandled(t, envelope, 1)
-		var action, target string
-		err = testEnv.connector.TransactionalClient().QueryRowContext(t.Context(), "test.audit.reservation",
-			`SELECT action, target_id FROM audit_entries WHERE event_id = ?`, envelope.ID()).Scan(&action, &target)
+		require.NoError(t, dispatcher.Dispatch(t.Context(), envelope))
+		waitHandled(t, envelope, 2)
+		var action, targetID, module string
+		err = testEnv.connector.TransactionalClient().QueryRowContext(t.Context(), "test.audit.event",
+			`SELECT action, target_id, module_key FROM audit_entries WHERE event_id = ?`, envelope.ID()).
+			Scan(&action, &targetID, &module)
 		require.NoError(t, err)
-		require.Equal(t, item.action, action)
-		require.Equal(t, item.target, target)
+		require.Equal(t, "arbitrary.action", action)
+		require.Equal(t, target.String(), targetID)
+		require.Equal(t, producer, module)
 	}
 }
 

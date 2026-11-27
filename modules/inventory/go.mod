@@ -3,6 +3,7 @@ module inventory
 go 1.27.1
 
 require (
+	audit v0.0.0
 	authz v0.0.0
 	github.com/distributed-programming-2026/go-sdk/pkg/amqp v0.0.5
 	github.com/distributed-programming-2026/go-sdk/pkg/event v0.0.5
@@ -93,3 +94,5 @@ replace github.com/distributed-programming-2026/lib => ../../lib
 replace authz => ../authz
 
 replace session => ../session
+
+replace audit => ../audit

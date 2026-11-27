@@ -12,19 +12,23 @@ import (
 	"github.com/distributed-programming-2026/go-sdk/pkg/uow"
 	"github.com/stretchr/testify/require"
 
+	auditcontract "audit/api/events"
 	"audit/internal/audit/app"
 	auditevents "audit/internal/audit/infra/handlers/events"
 	auditmysql "audit/internal/audit/infra/mysql"
-	inventoryevents "inventory/api/events"
 )
 
-func TestInventoryEventInboxAtomicity(t *testing.T) {
+func TestAuditEventInboxAtomicity(t *testing.T) {
 	unit := uow.NewUnitOfWork(mysql.NewConnectionPool(testClient), auditmysql.NewRepositoryProvider)
 	service := app.NewService(unit, nil)
 	business := auditevents.NewHandler(slog.Default(), service)
 	actor, inventoryID := uuid.New(), uuid.New()
-	envelope, err := event.New(t.Context(), "inventory", "InventoryCreated", &inventoryevents.InventoryCreated{
-		InventoryId: inventoryID.String(), Name: "Холодильник", ActorId: actor.String(),
+	envelope, err := event.New(t.Context(), "example", "AuditRecordRequested", &auditcontract.AuditRecordRequested{
+		TargetId:     inventoryID.String(),
+		TargetType:   "object",
+		Action:       "custom.created",
+		MetadataJson: []byte(`{"name":"Холодильник"}`),
+		ActorId:      actor.String(),
 	})
 	require.NoError(t, err)
 	failure := errors.New("failure after audit insert")
@@ -59,7 +63,7 @@ func TestInventoryEventInboxAtomicity(t *testing.T) {
 	entry, err := service.GetAuditEntry(t.Context(), envelope.ID())
 	require.NoError(t, err)
 	data := entry.Data()
-	require.Equal(t, "inventory.created", data.Action)
+	require.Equal(t, "custom.created", data.Action)
 	require.Equal(t, inventoryID.String(), data.TargetID)
 	require.Equal(t, actor, *data.ActorID)
 	require.Equal(t, envelope.CorrelationID(), data.CorrelationID)

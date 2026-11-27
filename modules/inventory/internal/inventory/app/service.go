@@ -41,7 +41,15 @@ func (s *Service) dispatch(ctx context.Context, message proto.Message) error {
 	if s.dispatcherFactory == nil {
 		return errors.New("inventory event dispatcher is not configured")
 	}
-	return s.dispatcherFactory.NewDispatcher(ctx).Dispatch(message)
+	dispatcher := s.dispatcherFactory.NewDispatcher(ctx)
+	if err := dispatcher.Dispatch(message); err != nil {
+		return err
+	}
+	record, err := auditRecord(message)
+	if err != nil {
+		return err
+	}
+	return dispatcher.Dispatch(record)
 }
 
 func NewService(
