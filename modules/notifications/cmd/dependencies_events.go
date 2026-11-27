@@ -6,12 +6,12 @@ import (
 	"github.com/distributed-programming-2026/go-sdk/pkg/amqp"
 	"github.com/distributed-programming-2026/go-sdk/pkg/event"
 	eventamqp "github.com/distributed-programming-2026/go-sdk/pkg/event/amqp"
-	"github.com/distributed-programming-2026/go-sdk/pkg/event/inbox"
 	"github.com/distributed-programming-2026/go-sdk/pkg/event/outbox"
 	"github.com/distributed-programming-2026/go-sdk/pkg/uow"
 
 	domainevent "github.com/distributed-programming-2026/lib/event"
 
+	"notifications/internal/notifications/app"
 	"notifications/internal/notifications/config"
 	eventhandler "notifications/internal/notifications/infra/handlers/events"
 )
@@ -41,9 +41,11 @@ func newDispatcher(
 }
 
 func newMessageHandler(logger *slog.Logger, conf config.Env, db *database) (amqp.Handler, error) {
-	handler, _, err := inbox.Decorate(eventhandler.NewHandler(logger), db.unit, inbox.Config{
-		Consumer: conf.AMQP.Queue,
-	})
+	handler, err := eventhandler.WithInbox(
+		eventhandler.NewHandler(logger, app.NewService(db.unit, nil)),
+		db.unit,
+		conf.AMQP.Queue,
+	)
 	if err != nil {
 		return nil, err
 	}

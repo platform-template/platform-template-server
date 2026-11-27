@@ -7,3 +7,11 @@ message Echo {
   string ID = 1;
   string Body = 2;
 }
+
+// An initiating service provides the recipient and display content.
+message NotificationRequested {
+  string user_id = 1;
+  string kind = 2;
+  string title = 3;
+  string body = 4;
+}
