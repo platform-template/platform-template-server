@@ -67,6 +67,13 @@ func (s *BootstrapService) GetNavigation(ctx context.Context, token string) ([]N
 		return nil, err
 	}
 	items := make([]NavigationItem, 0, len(bootstrap.Modules)+1)
+	if bootstrap.Superuser {
+		bootstrap.Modules = make([]string, 0, len(moduleNavigation))
+		for module := range moduleNavigation {
+			bootstrap.Modules = append(bootstrap.Modules, module)
+		}
+		sort.Strings(bootstrap.Modules)
+	}
 	for _, module := range bootstrap.Modules {
 		if item, ok := moduleNavigation[module]; ok {
 			items = append(items, item)
