@@ -59,6 +59,47 @@ paths:
         '204': {description: Renamed}
         '400': {description: Invalid input}
         '404': {description: Plan not found}
+  /api/public/v1/meal-plans/{planId}/items:
+    parameters:
+      - {name: planId, in: path, required: true, schema: {type: string}}
+    post:
+      operationId: scheduleItem
+      security: [{sessionCookie: []}]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/itemInput'}
+      responses:
+        '201':
+          description: Scheduled item
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/mealItem'}
+        '400': {description: Invalid input}
+        '404': {description: Plan not found}
+  /api/public/v1/meal-plans/{planId}/items/{itemId}/completion:
+    parameters:
+      - {name: planId, in: path, required: true, schema: {type: string}}
+      - {name: itemId, in: path, required: true, schema: {type: string}}
+    post:
+      operationId: completeItem
+      security: [{sessionCookie: []}]
+      responses:
+        '204': {description: Completion requested}
+        '400': {description: Invalid state or identifier}
+        '404': {description: Plan not found}
+  /api/public/v1/meal-plans/{planId}/items/{itemId}/cancellation:
+    parameters:
+      - {name: planId, in: path, required: true, schema: {type: string}}
+      - {name: itemId, in: path, required: true, schema: {type: string}}
+    post:
+      operationId: cancelItem
+      security: [{sessionCookie: []}]
+      responses:
+        '204': {description: Cancellation requested}
+        '400': {description: Invalid state or identifier}
+        '404': {description: Plan not found}
   /api/public/v1/echo:
     post:
       operationId: echo
@@ -90,6 +131,28 @@ components:
       required: [name]
       properties:
         name: {type: string, minLength: 1, maxLength: 255}
+    itemInput:
+      type: object
+      required: [kind, scheduledAt, inventoryIds, shoppingListId]
+      properties:
+        kind: {type: string, enum: [dish, product]}
+        recipeId: {type: string}
+        servings: {type: integer, minimum: 1}
+        productId: {type: string}
+        quantity: {type: integer, minimum: 1}
+        scheduledAt: {type: string, format: date-time}
+        inventoryIds: {type: array, minItems: 1, items: {type: string}}
+        shoppingListId: {type: string}
+    mealItem:
+      type: object
+      required: [id, planId, kind, scheduledAt, state, revision]
+      properties:
+        id: {type: string}
+        planId: {type: string}
+        kind: {type: string}
+        scheduledAt: {type: string, format: date-time}
+        state: {type: string}
+        revision: {type: string}
     echoRequest:
       type: object
       properties:

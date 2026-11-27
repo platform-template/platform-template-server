@@ -55,7 +55,7 @@ func TestMealPersistence(t *testing.T) {
 			PlanID:         planID,
 			Kind:           domain.Dish,
 			RecipeID:       uuid.New(),
-			RecipeName:     "Soup",
+			RecipeName:     testRecipeName,
 			Servings:       2,
 			ScheduledAt:    when,
 			Ingredients:    []domain.Ingredient{{ProductID: product, Quantity: 8}},

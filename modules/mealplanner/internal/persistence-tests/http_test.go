@@ -11,6 +11,7 @@ import (
 	"uuid"
 
 	"mealplanner/internal/mealplanner/app"
+	"mealplanner/internal/mealplanner/domain"
 	public "mealplanner/internal/mealplanner/infra/handlers/public"
 	sessionapi "session/api/server/internalapi"
 
@@ -45,7 +46,17 @@ func (s fakeSessions) ResolveSession(
 func testPlanHTTP(t *testing.T, service *app.Service) {
 	t.Helper()
 	sessions := fakeSessions{owner: uuid.New(), stranger: uuid.New()}
-	register, err := public.Register(service, slog.Default(), sessions)
+	recipe, product := uuid.New(), uuid.New()
+	planning := app.NewPlanningService(service, app.PlanningDependencies{
+		Inventory: fakeInventory{}, Shopping: fakeShopping{},
+		Recipes: fakeRecipes{snapshot: domain.RecipeSnapshot{
+			RecipeID:    recipe,
+			Name:        testRecipeName,
+			Servings:    2,
+			Ingredients: []domain.Ingredient{{ProductID: product, Quantity: 3}},
+		}},
+	})
+	register, err := public.Register(planning, slog.Default(), sessions)
 	require.NoError(t, err)
 	router := chi.NewRouter()
 	require.NoError(t, register(router))
@@ -90,4 +101,27 @@ func testPlanHTTP(t *testing.T, service *app.Service) {
 	require.Equal(t, http.StatusOK, listed.Code)
 	require.Contains(t, listed.Body.String(), plan.ID)
 	require.Equal(t, http.StatusBadRequest, request("POST", base, "owner", `{"name":""}`, "").Code)
+	schedule := request(
+		"POST",
+		path+"/items",
+		"owner",
+		`{"kind":"dish","recipeId":"`+recipe.String()+`","servings":2,"scheduledAt":"2026-12-01T12:00:00Z","inventoryIds":["`+uuid.New().
+			String()+
+			`"],"shoppingListId":"`+uuid.New().
+			String()+
+			`"}`,
+		"",
+	)
+	require.Equal(t, http.StatusCreated, schedule.Code, schedule.Body.String())
+	var item struct {
+		ID string `json:"id"`
+	}
+	require.NoError(t, json.Unmarshal(schedule.Body.Bytes(), &item))
+	require.NotEmpty(t, item.ID)
+	require.Equal(t, http.StatusBadRequest, request("POST", path+"/items/"+item.ID+"/completion", "owner", "", "").Code)
+	require.Equal(
+		t,
+		http.StatusNoContent,
+		request("POST", path+"/items/"+item.ID+"/cancellation", "owner", "", "").Code,
+	)
 }

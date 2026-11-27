@@ -20,6 +20,8 @@ import (
 
 type fakeInventory struct{ err error }
 
+const testRecipeName = "Soup"
+
 func (f fakeInventory) CheckOwners(context.Context, uuid.UUID, []uuid.UUID) error { return f.err }
 func (f fakeInventory) ValidateProduct(context.Context, uuid.UUID) error          { return f.err }
 
@@ -51,7 +53,12 @@ func testScheduling(
 		Inventory: fakeInventory{},
 		Shopping:  fakeShopping{},
 		Recipes: fakeRecipes{
-			snapshot: domain.RecipeSnapshot{RecipeID: recipe, Name: "Soup", Servings: 2, Ingredients: ingredients},
+			snapshot: domain.RecipeSnapshot{
+				RecipeID:    recipe,
+				Name:        testRecipeName,
+				Servings:    2,
+				Ingredients: ingredients,
+			},
 		},
 	}
 	service := app.NewPlanningService(base, deps)
