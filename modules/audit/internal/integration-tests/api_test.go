@@ -8,8 +8,10 @@ import (
 	"strings"
 	"testing"
 	"time"
+	"uuid"
 
 	"github.com/distributed-programming-2026/go-sdk/pkg/amqp"
+	"github.com/distributed-programming-2026/go-sdk/pkg/event"
 	eventamqp "github.com/distributed-programming-2026/go-sdk/pkg/event/amqp"
 	"github.com/stretchr/testify/require"
 	"google.golang.org/grpc"
@@ -19,6 +21,7 @@ import (
 
 	internalapi "audit/api/server/internalapi"
 	publicapi "audit/api/server/publicapi"
+	inventoryevents "inventory/api/events"
 )
 
 func TestHTTPAndGRPCDelivery(t *testing.T) {
@@ -65,6 +68,35 @@ func TestHTTPAndGRPCDelivery(t *testing.T) {
 	require.NoError(t, dispatcher.Dispatch(t.Context(), envelope))
 	waitHandled(t, envelope, 2)
 	require.Equal(t, 1, testEnv.logs.count("echo received", "echo_id", response.JSON200.OperationID))
+}
+
+func TestInventoryEventIsAuditedOnce(t *testing.T) {
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	connection := amqp.NewConnection(moduleID, amqp.ConnectionConfig{
+		URL: testEnv.conf.AMQP.URL, ConnectTimeout: time.Second,
+	}, logger)
+	defer func() { require.NoError(t, connection.Stop()) }()
+	dispatcher, err := eventamqp.NewDispatcher(connection.Producer(domainevent.DomainExchange(), nil, nil))
+	require.NoError(t, err)
+	require.NoError(t, connection.Start())
+	actor, inventoryID := uuid.New(), uuid.New()
+	envelope, err := event.New(t.Context(), "inventory", "InventoryCreated", &inventoryevents.InventoryCreated{
+		InventoryId: inventoryID.String(), Name: "Морозилка", ActorId: actor.String(),
+	})
+	require.NoError(t, err)
+	require.NoError(t, dispatcher.Dispatch(t.Context(), envelope))
+	require.NoError(t, dispatcher.Dispatch(t.Context(), envelope))
+	waitHandled(t, envelope, 2)
+	var action, target, correlation string
+	var actorBytes []byte
+	err = testEnv.connector.TransactionalClient().QueryRowContext(t.Context(), "test.audit.event",
+		`SELECT action, target_id, correlation_id, actor_id FROM audit_entries WHERE event_id = ?`, envelope.ID(),
+	).Scan(&action, &target, &correlation, &actorBytes)
+	require.NoError(t, err)
+	require.Equal(t, "inventory.created", action)
+	require.Equal(t, inventoryID.String(), target)
+	require.Equal(t, envelope.CorrelationID(), correlation)
+	require.Equal(t, actor[:], actorBytes)
 }
 
 func TestInvalidHTTPRequests(t *testing.T) {

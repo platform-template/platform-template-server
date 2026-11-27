@@ -12,6 +12,7 @@ import (
 	"time"
 	"uuid"
 
+	"github.com/distributed-programming-2026/go-sdk/pkg/event/inbox"
 	"github.com/distributed-programming-2026/go-sdk/pkg/migrator"
 	"github.com/distributed-programming-2026/go-sdk/pkg/mysql"
 	"github.com/distributed-programming-2026/go-sdk/pkg/uow"
@@ -87,6 +88,10 @@ func runTests(m *testing.M) (exitCode int) {
 		return 1
 	}
 	if err := runner.Migrate(ctx, "audit", migrations.Database(testClient)...); err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		return 1
+	}
+	if err := runner.Migrate(ctx, "event-inbox", inbox.Migrations(testClient)...); err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		return 1
 	}
