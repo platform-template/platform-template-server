@@ -21,6 +21,7 @@ type allocationHandler interface {
 	ApplyAllocation(context.Context, app.AllocationResult) error
 	ConfirmCancellation(context.Context, app.CancellationConfirmation) error
 	ConfirmCompletion(context.Context, app.CompletionConfirmation) error
+	RetryAfterPurchase(context.Context, app.PurchaseConfirmation) error
 }
 type handler struct {
 	logger  *slog.Logger
@@ -55,9 +56,47 @@ func (h *handler) Handle(ctx context.Context, envelope event.Envelope) error {
 		return h.confirmConsumption(ctx, envelope)
 	case envelope.Producer() == inventoryProducer && envelope.Type() == "AllocationCompleted":
 		return h.applyAllocation(ctx, envelope)
+	case envelope.Producer() == "shopping" && envelope.Type() == "PurchaseConfirmed":
+		return h.retryAfterPurchase(ctx, envelope)
 	default:
 		return fmt.Errorf("unsupported event %s.%s", envelope.Producer(), envelope.Type())
 	}
+}
+
+func (h *handler) retryAfterPurchase(ctx context.Context, envelope event.Envelope) error {
+	var payload shoppingevents.PurchaseConfirmed
+	if err := envelope.UnmarshalPayload(&payload); err != nil {
+		return err
+	}
+	if payload.MealPlanId == "" || payload.MealItemId == "" || payload.Revision == "" {
+		return nil
+	}
+	actor, err := parseID(payload.ActorId)
+	if err != nil {
+		return err
+	}
+	plan, err := parseID(payload.MealPlanId)
+	if err != nil {
+		return err
+	}
+	item, err := parseID(payload.MealItemId)
+	if err != nil {
+		return err
+	}
+	revision, err := parseID(payload.Revision)
+	if err != nil {
+		return err
+	}
+	list, err := parseID(payload.ShoppingListId)
+	if err != nil {
+		return err
+	}
+	return h.service.RetryAfterPurchase(
+		ctx,
+		app.PurchaseConfirmation{
+			ActorID: actor, PlanID: plan, ItemID: item, Revision: revision, ShoppingListID: list,
+		},
+	)
 }
 
 func (h *handler) confirmInventoryCancellation(ctx context.Context, envelope event.Envelope) error {

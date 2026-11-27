@@ -33,8 +33,14 @@ func (s *Service) CancelItem(ctx context.Context, actor, planID, itemID uuid.UUI
 			return domain.ErrInvalidItem
 		}
 		data := item.Data()
-		if data.State == domain.Cancelling || data.State == domain.Cancelled {
+		if data.State == domain.Cancelled {
 			return nil
+		}
+		if data.State == domain.Cancelling {
+			if !item.CancelRetry() {
+				return nil
+			}
+			return p.Item(ctx).Update(item, version)
 		}
 		if err := item.RequestCancellation(); err != nil {
 			return err
@@ -121,6 +127,13 @@ func (s *Service) ConfirmCancellation(ctx context.Context, input CancellationCon
 		if err := p.Item(ctx).Update(item, version); err != nil {
 			return err
 		}
+		restarted, err := s.restartAfterCancellation(ctx, p, item, version, input.ActorID)
+		if err != nil {
+			return err
+		}
+		if restarted {
+			return nil
+		}
 		if item.Data().State != domain.Cancelled {
 			return nil
 		}
@@ -140,4 +153,30 @@ func (s *Service) ConfirmCancellation(ctx context.Context, input CancellationCon
 		return fmt.Errorf("confirm meal cancellation: %w", err)
 	}
 	return nil
+}
+
+func (s *Service) restartAfterCancellation(
+	ctx context.Context,
+	p *mysql.RepositoryProvider,
+	item *domain.Item,
+	version uint64,
+	actor uuid.UUID,
+) (bool, error) {
+	data := item.Data()
+	if !data.RetryRequested || !data.InventoryCancellationConfirmed || !data.ShoppingCancellationConfirmed {
+		return false, nil
+	}
+	if !item.RestartAfterCancellation(uuid.New()) {
+		return false, domain.ErrInvalidItem
+	}
+	if err := p.Item(ctx).Update(item, version+1); err != nil {
+		return false, err
+	}
+	if s.dispatcherFactory == nil {
+		return false, errors.New("event dispatcher is not configured")
+	}
+	if err := s.dispatchPlanning(ctx, actor, item); err != nil {
+		return false, err
+	}
+	return true, nil
 }

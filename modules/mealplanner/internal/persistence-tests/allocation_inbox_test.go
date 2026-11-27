@@ -94,7 +94,9 @@ func testAllocationInbox(
 		t,
 		client.QueryRowContext(ctx, "test.outbox.count", `SELECT COUNT(*) FROM event_outbox`).Scan(&after),
 	)
-	require.Equal(t, before+1, after)
+	// The allocation result records both the immutable audit entry and the
+	// universal notification request in the same transaction.
+	require.Equal(t, before+2, after)
 	payload.Revision = uuid.New().String()
 	old, err := event.New(ctx, "inventory", "AllocationCompleted", payload)
 	require.NoError(t, err)

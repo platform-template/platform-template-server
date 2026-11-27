@@ -115,11 +115,17 @@ func TestShoppingLists(t *testing.T) {
 	)
 	require.Equal(t, 2, count)
 	testListOwnerGRPC(t, service, owner, stranger, list.ID())
-	testManualDemandAndPurchase(t, ctx, client, service, owner, list.ID())
+	testManualDemandAndPurchase(ctx, t, client, service, owner, list.ID())
 	testShortageInbox(ctx, t, client, unit, service, owner, list.ID())
 }
 
-func testManualDemandAndPurchase(t *testing.T, ctx context.Context, client mysql.TransactionalClient, service *app.Service, owner, listID uuid.UUID) {
+func testManualDemandAndPurchase(
+	ctx context.Context,
+	t *testing.T,
+	client mysql.TransactionalClient,
+	service *app.Service,
+	owner, listID uuid.UUID,
+) {
 	t.Helper()
 	product, inventory, operation := uuid.New(), uuid.New(), uuid.New()
 	demand, err := service.CreateManualDemand(ctx, owner, listID, product, 5)
@@ -135,7 +141,15 @@ func testManualDemandAndPurchase(t *testing.T, ctx context.Context, client mysql
 	require.NoError(t, err)
 	require.EqualValues(t, 3, demands[0].Data().Purchased)
 	var purchases int
-	require.NoError(t, client.QueryRowContext(ctx, "test.purchase.count", `SELECT COUNT(*) FROM shopping_purchases WHERE id = ?`, operation[:]).Scan(&purchases))
+	require.NoError(
+		t,
+		client.QueryRowContext(
+			ctx,
+			"test.purchase.count",
+			`SELECT COUNT(*) FROM shopping_purchases WHERE id = ?`,
+			operation[:],
+		).Scan(&purchases),
+	)
 	require.Equal(t, 1, purchases)
 }
 

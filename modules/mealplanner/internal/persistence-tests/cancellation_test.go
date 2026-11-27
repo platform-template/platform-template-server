@@ -5,6 +5,7 @@ import (
 	"errors"
 	"log/slog"
 	"testing"
+	"time"
 	"uuid"
 
 	inventoryevents "inventory/api/events"
@@ -19,6 +20,100 @@ import (
 	"github.com/distributed-programming-2026/go-sdk/pkg/uow"
 	"github.com/stretchr/testify/require"
 )
+
+func testPurchaseRetry(
+	ctx context.Context,
+	t *testing.T,
+	client mysql.TransactionalClient,
+	unit uow.UnitOfWorkWithRepositoryProvider[*mealdb.RepositoryProvider],
+	service *app.Service,
+	owner uuid.UUID,
+	planID uuid.UUID,
+) {
+	t.Helper()
+	product, inventoryID, list, revision := uuid.New(), uuid.New(), uuid.New(), uuid.New()
+	item, err := domain.NewItem(domain.ItemData{
+		ID: uuid.New(), PlanID: planID, Kind: domain.Product, ScheduledAt: time.Now(),
+		Ingredients: []domain.Ingredient{{ProductID: product, Quantity: 2}}, InventoryIDs: []uuid.UUID{inventoryID},
+		ShoppingListID: list, Revision: revision,
+	})
+	require.NoError(t, err)
+	require.NoError(t, unit.ExecuteWithRepositoryProvider(ctx, func(p *mealdb.RepositoryProvider) error {
+		return p.Item(ctx).Create(item)
+	}))
+	require.NoError(t, service.ApplyAllocation(ctx, app.AllocationResult{
+		PlanID:         planID,
+		ItemID:         item.Data().ID,
+		Revision:       revision,
+		ActorID:        owner,
+		ShoppingListID: list,
+		Version:        1,
+		Allocations: []domain.AllocationLine{
+			{InventoryID: inventoryID, ReservationID: uuid.New(), ProductID: product, Quantity: 1},
+		},
+		Shortages: []domain.Ingredient{{ProductID: product, Quantity: 1}},
+	}))
+	data := item.Data()
+	wrapped, err := handler.WithInbox(
+		handler.NewHandler(slog.Default(), service),
+		unit,
+		"purchase-retry-test-"+uuid.New().String(),
+	)
+	require.NoError(t, err)
+	var before, after int
+	require.NoError(
+		t,
+		client.QueryRowContext(ctx, "test.outbox.count", `SELECT COUNT(*) FROM event_outbox`).Scan(&before),
+	)
+	purchase := &shoppingevents.PurchaseConfirmed{
+		ActorId:        owner.String(),
+		ShoppingListId: data.ShoppingListID.String(),
+		MealPlanId:     data.PlanID.String(),
+		MealItemId:     data.ID.String(),
+		Revision:       data.Revision.String(),
+	}
+	envelope, err := event.New(ctx, "shopping", "PurchaseConfirmed", purchase)
+	require.NoError(t, err)
+	require.NoError(t, wrapped.Handle(ctx, envelope))
+	require.NoError(t, wrapped.Handle(ctx, envelope))
+	stored, _, err := mealdb.NewRepositoryProvider(client).Item(ctx).Get(data.PlanID, data.ID)
+	require.NoError(t, err)
+	require.Equal(t, domain.Cancelling, stored.Data().State)
+	require.True(t, stored.Data().RetryRequested)
+
+	shopping := &shoppingevents.ShortagesCancelled{
+		ActorId:        owner.String(),
+		PlanId:         data.PlanID.String(),
+		ItemId:         data.ID.String(),
+		Revision:       data.Revision.String(),
+		ShoppingListId: data.ShoppingListID.String(),
+	}
+	shoppingEnvelope, err := event.New(ctx, "shopping", "ShortagesCancelled", shopping)
+	require.NoError(t, err)
+	require.NoError(t, wrapped.Handle(ctx, shoppingEnvelope))
+	inventory := &inventoryevents.AllocationCancelled{
+		ActorId:        owner.String(),
+		PlanId:         data.PlanID.String(),
+		ItemId:         data.ID.String(),
+		Revision:       data.Revision.String(),
+		ShoppingListId: data.ShoppingListID.String(),
+	}
+	inventoryEnvelope, err := event.New(ctx, "inventory", "AllocationCancelled", inventory)
+	require.NoError(t, err)
+	require.NoError(t, wrapped.Handle(ctx, inventoryEnvelope))
+	stored, _, err = mealdb.NewRepositoryProvider(client).Item(ctx).Get(data.PlanID, data.ID)
+	require.NoError(t, err)
+	require.Equal(t, domain.Planning, stored.Data().State)
+	require.NotEqual(t, data.Revision, stored.Data().Revision)
+	require.Zero(t, stored.Data().ReservationVersion)
+	require.Empty(t, stored.Data().Allocations)
+	require.Empty(t, stored.Data().Shortages)
+	require.NoError(
+		t,
+		client.QueryRowContext(ctx, "test.outbox.count", `SELECT COUNT(*) FROM event_outbox`).Scan(&after),
+	)
+	require.Equal(t, before+2, after)
+}
 
 func testCancellationInbox(
 	ctx context.Context,

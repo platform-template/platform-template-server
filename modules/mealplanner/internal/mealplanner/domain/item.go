@@ -74,6 +74,7 @@ type ItemData struct {
 	Allocations                    []AllocationLine
 	InventoryCancellationConfirmed bool
 	ShoppingCancellationConfirmed  bool
+	RetryRequested                 bool
 }
 
 type Item struct{ data ItemData }
@@ -117,6 +118,7 @@ func NewItem(data ItemData) (*Item, error) {
 	data.State = Planning
 	data.InventoryCancellationConfirmed = false
 	data.ShoppingCancellationConfirmed = false
+	data.RetryRequested = false
 	data.ReservationVersion = 0
 	data.ScheduledAt = data.ScheduledAt.UTC()
 	return &Item{data: data}, nil
@@ -146,7 +148,7 @@ func RestoreItem(data ItemData) (*Item, error) {
 			return nil, ErrInvalidItem
 		}
 	case Cancelled:
-		if !data.InventoryCancellationConfirmed || !data.ShoppingCancellationConfirmed {
+		if !data.InventoryCancellationConfirmed || !data.ShoppingCancellationConfirmed || data.RetryRequested {
 			return nil, ErrInvalidItem
 		}
 	case Failed:
@@ -172,6 +174,7 @@ func RestoreItem(data ItemData) (*Item, error) {
 	item.data.Allocations = append([]AllocationLine(nil), data.Allocations...)
 	item.data.InventoryCancellationConfirmed = data.InventoryCancellationConfirmed
 	item.data.ShoppingCancellationConfirmed = data.ShoppingCancellationConfirmed
+	item.data.RetryRequested = data.RetryRequested
 	item.data.State = data.State
 	item.data.ReservationVersion = data.ReservationVersion
 	item.data.Shortages = append([]Ingredient(nil), data.Shortages...)
@@ -257,6 +260,45 @@ func (i *Item) RequestCancellation() error {
 	}
 }
 
+// RequestRetry compensates the current partial allocation before creating a new
+// revision. Existing reservations stay terminal and cannot leak into the retry.
+func (i *Item) RequestRetry() error {
+	if i.data.State != Missing {
+		return ErrInvalidTransition
+	}
+	i.data.State = Cancelling
+	i.data.RetryRequested = true
+	i.data.InventoryCancellationConfirmed = false
+	i.data.ShoppingCancellationConfirmed = false
+	return nil
+}
+
+// CancelRetry gives an explicit user cancellation precedence over a purchase
+// notification that was already in flight.
+func (i *Item) CancelRetry() bool {
+	if i.data.State != Cancelling || !i.data.RetryRequested {
+		return false
+	}
+	i.data.RetryRequested = false
+	return true
+}
+
+func (i *Item) RestartAfterCancellation(nextRevision uuid.UUID) bool {
+	if nextRevision == uuid.Nil() || i.data.State != Cancelling || !i.data.RetryRequested ||
+		!i.data.InventoryCancellationConfirmed || !i.data.ShoppingCancellationConfirmed {
+		return false
+	}
+	i.data.Revision = nextRevision
+	i.data.State = Planning
+	i.data.ReservationVersion = 0
+	i.data.Shortages = nil
+	i.data.Allocations = nil
+	i.data.InventoryCancellationConfirmed = false
+	i.data.ShoppingCancellationConfirmed = false
+	i.data.RetryRequested = false
+	return true
+}
+
 type CancellationParticipant string
 
 const (
@@ -285,7 +327,7 @@ func (i *Item) ConfirmCancellation(revision uuid.UUID, participant CancellationP
 	default:
 		return false, ErrInvalidTransition
 	}
-	if i.data.InventoryCancellationConfirmed && i.data.ShoppingCancellationConfirmed {
+	if i.data.InventoryCancellationConfirmed && i.data.ShoppingCancellationConfirmed && !i.data.RetryRequested {
 		i.data.State = Cancelled
 	}
 	return true, nil

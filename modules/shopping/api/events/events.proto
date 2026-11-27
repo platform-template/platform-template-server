@@ -22,4 +22,7 @@ message PurchaseConfirmed {
  string inventory_id = 5;
  int64 quantity = 6;
  string actor_id = 7;
+ string meal_plan_id = 8;
+ string meal_item_id = 9;
+ string revision = 10;
 }

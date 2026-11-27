@@ -24,6 +24,7 @@ func newDispatcher(
 	connection amqp.Connection,
 ) (event.Dispatcher, *outbox.Relay, error) {
 	domainevent.DeclareSubscriber(connection, conf.AMQP.MealPlannerQueue, "shopping.ShortagesCancelled")
+	domainevent.DeclareSubscriber(connection, conf.AMQP.MealPlannerQueue, "shopping.PurchaseConfirmed")
 	domainevent.DeclareSubscriber(connection, conf.AMQP.InventoryQueue, "shopping.PurchaseConfirmed")
 	domainevent.DeclareSubscriber(connection, conf.AMQP.AuditQueue, "*.AuditRecordRequested")
 

@@ -102,5 +102,7 @@ func testCompletionInbox(
 		t,
 		client.QueryRowContext(ctx, "test.outbox.count", `SELECT COUNT(*) FROM event_outbox`).Scan(&after),
 	)
-	require.Equal(t, before+3, after)
+	// Completion confirmation emits the audit record and the universal
+	// notification request atomically with the final item state.
+	require.Equal(t, before+4, after)
 }

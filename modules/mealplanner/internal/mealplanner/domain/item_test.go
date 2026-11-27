@@ -78,6 +78,79 @@ func TestItemValidationAndCancellation(t *testing.T) {
 	require.ErrorIs(t, err, ErrInvalidItem)
 }
 
+func TestItemRetriesAfterCompensatingPartialAllocation(t *testing.T) {
+	product, inventory, revision := uuid.New(), uuid.New(), uuid.New()
+	item, err := NewItem(
+		ItemData{
+			ID:             uuid.New(),
+			PlanID:         uuid.New(),
+			Kind:           Product,
+			ScheduledAt:    time.Now(),
+			Ingredients:    []Ingredient{{ProductID: product, Quantity: 2}},
+			InventoryIDs:   []uuid.UUID{inventory},
+			ShoppingListID: uuid.New(),
+			Revision:       revision,
+		},
+	)
+	require.NoError(t, err)
+	changed, err := item.ApplyAllocation(
+		revision,
+		1,
+		[]AllocationLine{{InventoryID: inventory, ReservationID: uuid.New(), ProductID: product, Quantity: 1}},
+		[]Ingredient{{ProductID: product, Quantity: 1}},
+	)
+	require.NoError(t, err)
+	require.True(t, changed)
+	require.Equal(t, Missing, item.Data().State)
+
+	require.NoError(t, item.RequestRetry())
+	_, err = item.ConfirmCancellation(revision, InventoryParticipant)
+	require.NoError(t, err)
+	_, err = item.ConfirmCancellation(revision, ShoppingParticipant)
+	require.NoError(t, err)
+	require.Equal(t, Cancelling, item.Data().State)
+	require.True(t, item.Data().RetryRequested)
+
+	nextRevision := uuid.New()
+	require.True(t, item.RestartAfterCancellation(nextRevision))
+	retried := item.Data()
+	require.Equal(t, Planning, retried.State)
+	require.Equal(t, nextRevision, retried.Revision)
+	require.Zero(t, retried.ReservationVersion)
+	require.Empty(t, retried.Allocations)
+	require.Empty(t, retried.Shortages)
+
+	require.NoError(t, item.RequestCancellation())
+	require.Equal(t, Cancelling, item.Data().State)
+}
+
+func TestItemUserCancellationWinsOverRetry(t *testing.T) {
+	product, revision := uuid.New(), uuid.New()
+	item, err := NewItem(
+		ItemData{
+			ID:             uuid.New(),
+			PlanID:         uuid.New(),
+			Kind:           Product,
+			ScheduledAt:    time.Now(),
+			Ingredients:    []Ingredient{{ProductID: product, Quantity: 1}},
+			InventoryIDs:   []uuid.UUID{uuid.New()},
+			ShoppingListID: uuid.New(),
+			Revision:       revision,
+		},
+	)
+	require.NoError(t, err)
+	changed, err := item.ApplyReservation(revision, 1, []Ingredient{{ProductID: product, Quantity: 1}})
+	require.NoError(t, err)
+	require.True(t, changed)
+	require.NoError(t, item.RequestRetry())
+	require.True(t, item.CancelRetry())
+	_, err = item.ConfirmCancellation(revision, InventoryParticipant)
+	require.NoError(t, err)
+	_, err = item.ConfirmCancellation(revision, ShoppingParticipant)
+	require.NoError(t, err)
+	require.Equal(t, Cancelled, item.Data().State)
+}
+
 func TestPlanRequiresOwnerAndName(t *testing.T) {
 	_, err := NewPlan(uuid.New(), uuid.Nil(), "Plan")
 	require.ErrorIs(t, err, ErrInvalidPlan)

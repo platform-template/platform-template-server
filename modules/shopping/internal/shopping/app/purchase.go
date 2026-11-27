@@ -113,7 +113,7 @@ func (s *Service) ConfirmPurchase(
 			return errors.New("event dispatcher is not configured")
 		}
 		dispatcher := s.dispatcherFactory.NewDispatcher(ctx)
-		if err := dispatcher.Dispatch(&shoppingevents.PurchaseConfirmed{
+		event := &shoppingevents.PurchaseConfirmed{
 			PurchaseId:     purchaseID.String(),
 			ShoppingListId: listID.String(),
 			DemandId:       demandID.String(),
@@ -121,7 +121,13 @@ func (s *Service) ConfirmPurchase(
 			InventoryId:    inventoryID.String(),
 			Quantity:       quantity,
 			ActorId:        owner.String(),
-		}); err != nil {
+		}
+		if source := demand.Data().Source; source != nil {
+			event.MealPlanId = source.MealPlanID.String()
+			event.MealItemId = source.MealItemID.String()
+			event.Revision = source.Revision.String()
+		}
+		if err := dispatcher.Dispatch(event); err != nil {
 			return err
 		}
 		return s.recordDemandAudit(ctx, owner, demand, "shopping_purchase.confirmed")
