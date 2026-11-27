@@ -6,7 +6,10 @@ import (
 	"uuid"
 )
 
-var ErrInvalidList = errors.New("invalid shopping list")
+var (
+	ErrInvalidList  = errors.New("invalid shopping list")
+	ErrListNotFound = errors.New("shopping list not found")
+)
 
 type List struct {
 	id, owner uuid.UUID
@@ -28,4 +31,11 @@ func (l *List) Rename(name string) error {
 	}
 	l.name = name
 	return nil
+}
+
+type ListRepository interface {
+	Create(*List) error
+	Get(ownerID, listID uuid.UUID) (*List, error)
+	List(ownerID uuid.UUID) ([]*List, error)
+	Update(*List) error
 }

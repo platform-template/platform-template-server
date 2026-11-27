@@ -5,6 +5,7 @@ option go_package = "/.;shoppinginternalapi";
 
 service ShoppingService {
   rpc Echo(EchoRequest) returns (EchoResponse);
+  rpc IsListOwner(IsListOwnerRequest) returns (IsListOwnerResponse);
 }
 
 message EchoRequest {
@@ -14,3 +15,7 @@ message EchoRequest {
 message EchoResponse {
   string OperationID = 1;
 }
+
+// This internal operation is intended for trusted callers verifying ownership.
+message IsListOwnerRequest { string user_id = 1; string list_id = 2; }
+message IsListOwnerResponse { bool is_owner = 1; }
