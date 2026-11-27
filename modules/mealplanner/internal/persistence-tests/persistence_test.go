@@ -12,6 +12,7 @@ import (
 	mealdb "mealplanner/internal/mealplanner/infra/mysql"
 	"mealplanner/internal/mealplanner/infra/mysql/migrations"
 
+	"github.com/distributed-programming-2026/go-sdk/pkg/event/outbox"
 	"github.com/distributed-programming-2026/go-sdk/pkg/migrator"
 	"github.com/distributed-programming-2026/go-sdk/pkg/mysql"
 	"github.com/distributed-programming-2026/go-sdk/pkg/uow"
@@ -40,6 +41,7 @@ func TestMealPersistence(t *testing.T) {
 	runner, err := migrator.New(client, slog.Default())
 	require.NoError(t, err)
 	require.NoError(t, runner.Migrate(ctx, "mealplanner", migrations.Database(client)...))
+	require.NoError(t, runner.Migrate(ctx, "event-outbox", outbox.Migrations(client)...))
 	unit := uow.NewUnitOfWork(mysql.NewConnectionPool(client), mealdb.NewRepositoryProvider)
 	owner, planID, itemID, product, revision := uuid.New(), uuid.New(), uuid.New(), uuid.New(), uuid.New()
 	plan, err := domain.NewPlan(planID, owner, "Week")
@@ -128,4 +130,5 @@ func TestMealPersistence(t *testing.T) {
 	missing, _, err := repo.Item(ctx).Get(planID, rollbackItem.Data().ID)
 	require.NoError(t, err)
 	require.Nil(t, missing)
+	testPlanApplication(ctx, t, client, unit)
 }
