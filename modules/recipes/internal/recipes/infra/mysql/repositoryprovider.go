@@ -22,3 +22,7 @@ type RepositoryProvider struct {
 func (p *RepositoryProvider) Echo(ctx context.Context) domain.EchoRepository {
 	return repository.NewEchoRepository(ctx, p.client)
 }
+
+func (p *RepositoryProvider) Recipe(ctx context.Context) domain.RecipeRepository {
+	return repository.NewRecipeRepository(ctx, p.client)
+}
