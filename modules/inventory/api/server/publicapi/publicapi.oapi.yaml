@@ -87,53 +87,251 @@ paths:
         "404": { description: Product not found }
         "500": { description: Internal error }
         "503": { description: Session unavailable }
-  /api/public/v1/products/{id}/stock:
-    get:
-      operationId: getStock
+    patch:
+      operationId: renameProduct
       security:
-        - sessionCookie: []
-      parameters:
-        - $ref: "#/components/parameters/productID"
+      - sessionCookie: []
       responses:
-        "200":
-          description: Stock
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/stock"
-        "400": { description: Invalid request }
-        "401": { description: Invalid session }
-        "404": { description: Product not found }
-        "500": { description: Internal error }
-        "503": { description: Session unavailable }
-  /api/public/v1/products/{id}/stock/add:
-    post:
-      operationId: addStock
-      description: Requires Superuser privileges.
-      security:
-        - sessionCookie: []
-      parameters:
-        - $ref: "#/components/parameters/productID"
+        '204':
+          description: Success
+        '400':
+          description: Invalid request
+        '401':
+          description: Invalid session
+        '403':
+          description: Forbidden
+        '404':
+          description: Not found
+        '503':
+          description: Unavailable
       requestBody:
         required: true
         content:
           application/json:
             schema:
-              type: object
-              required: [quantity]
-              properties:
-                quantity:
-                  type: integer
-                  format: int64
-                  minimum: 1
+              $ref: '#/components/schemas/nameRequest'
+      parameters:
+      - $ref: '#/components/parameters/productID'
+  /api/public/v1/inventories:
+    get:
+      operationId: listInventories
+      security:
+      - sessionCookie: []
       responses:
-        "204": { description: Stock added }
-        "400": { description: Invalid request }
-        "401": { description: Invalid session }
-        "403": { description: Permission denied }
-        "404": { description: Product not found }
-        "500": { description: Internal error }
-        "503": { description: Authorization unavailable }
+        '200':
+          description: Success
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/inventoryList'
+        '400':
+          description: Invalid request
+        '401':
+          description: Invalid session
+        '403':
+          description: Forbidden
+        '404':
+          description: Not found
+        '503':
+          description: Unavailable
+    post:
+      operationId: createInventory
+      security:
+      - sessionCookie: []
+      responses:
+        '201':
+          description: Success
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/inventory'
+        '400':
+          description: Invalid request
+        '401':
+          description: Invalid session
+        '403':
+          description: Forbidden
+        '404':
+          description: Not found
+        '503':
+          description: Unavailable
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/nameRequest'
+  /api/public/v1/inventories/{inventoryId}:
+    parameters:
+    - $ref: '#/components/parameters/inventoryID'
+    get:
+      operationId: getInventory
+      security:
+      - sessionCookie: []
+      responses:
+        '200':
+          description: Success
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/inventory'
+        '400':
+          description: Invalid request
+        '401':
+          description: Invalid session
+        '403':
+          description: Forbidden
+        '404':
+          description: Not found
+        '503':
+          description: Unavailable
+    patch:
+      operationId: renameInventory
+      security:
+      - sessionCookie: []
+      responses:
+        '204':
+          description: Success
+        '400':
+          description: Invalid request
+        '401':
+          description: Invalid session
+        '403':
+          description: Forbidden
+        '404':
+          description: Not found
+        '503':
+          description: Unavailable
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/nameRequest'
+  /api/public/v1/inventories/{inventoryId}/stocks:
+    parameters:
+    - $ref: '#/components/parameters/inventoryID'
+    get:
+      operationId: listStocks
+      security:
+      - sessionCookie: []
+      responses:
+        '200':
+          description: Success
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/stockList'
+        '400':
+          description: Invalid request
+        '401':
+          description: Invalid session
+        '403':
+          description: Forbidden
+        '404':
+          description: Not found
+        '503':
+          description: Unavailable
+  /api/public/v1/inventories/{inventoryId}/stocks/{productId}:
+    parameters:
+    - $ref: '#/components/parameters/inventoryID'
+    - $ref: '#/components/parameters/stockProductID'
+    get:
+      operationId: getStock
+      security:
+      - sessionCookie: []
+      responses:
+        '200':
+          description: Success
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/stock'
+        '400':
+          description: Invalid request
+        '401':
+          description: Invalid session
+        '403':
+          description: Forbidden
+        '404':
+          description: Not found
+        '503':
+          description: Unavailable
+    post:
+      operationId: createStock
+      security:
+      - sessionCookie: []
+      responses:
+        '201':
+          description: Success
+        '400':
+          description: Invalid request
+        '401':
+          description: Invalid session
+        '403':
+          description: Forbidden
+        '404':
+          description: Not found
+        '409':
+          description: Conflict
+        '503':
+          description: Unavailable
+  /api/public/v1/inventories/{inventoryId}/stocks/{productId}/add:
+    parameters:
+    - $ref: '#/components/parameters/inventoryID'
+    - $ref: '#/components/parameters/stockProductID'
+    post:
+      operationId: addStock
+      security:
+      - sessionCookie: []
+      responses:
+        '204':
+          description: Success
+        '400':
+          description: Invalid request
+        '401':
+          description: Invalid session
+        '403':
+          description: Forbidden
+        '404':
+          description: Not found
+        '503':
+          description: Unavailable
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/quantityRequest'
+  /api/public/v1/inventories/{inventoryId}/stocks/{productId}/remove:
+    parameters:
+    - $ref: '#/components/parameters/inventoryID'
+    - $ref: '#/components/parameters/stockProductID'
+    post:
+      operationId: removeStock
+      security:
+      - sessionCookie: []
+      responses:
+        '204':
+          description: Success
+        '400':
+          description: Invalid request
+        '401':
+          description: Invalid session
+        '403':
+          description: Forbidden
+        '404':
+          description: Not found
+        '409':
+          description: Conflict
+        '503':
+          description: Unavailable
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/quantityRequest'
   /api/public/v1/echo:
     post:
       operationId: echo
@@ -164,7 +362,67 @@ components:
       schema:
         type: string
         format: uuid
+    inventoryID:
+      name: inventoryId
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+    stockProductID:
+      name: productId
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
   schemas:
+    nameRequest:
+      type: object
+      required:
+      - name
+      properties:
+        name:
+          type: string
+          maxLength: 255
+    quantityRequest:
+      type: object
+      required:
+      - quantity
+      properties:
+        quantity:
+          type: integer
+          format: int64
+          minimum: 1
+    inventory:
+      type: object
+      required:
+      - id
+      - name
+      properties:
+        id:
+          type: string
+          format: uuid
+        name:
+          type: string
+    inventoryList:
+      type: object
+      required:
+      - inventories
+      properties:
+        inventories:
+          type: array
+          items:
+            $ref: '#/components/schemas/inventory'
+    stockList:
+      type: object
+      required:
+      - stocks
+      properties:
+        stocks:
+          type: array
+          items:
+            $ref: '#/components/schemas/stock'
     createProductRequest:
       type: object
       required: [name, unit]
@@ -188,11 +446,13 @@ components:
           type: string
     stock:
       type: object
-      required: [productId, quantity, reservedQuantity, available]
+      required: [productId, quantity, reservedQuantity, available, exists]
       properties:
         productId:
           type: string
           format: uuid
+        exists:
+          type: boolean
         quantity:
           type: integer
           format: int64

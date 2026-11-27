@@ -78,8 +78,11 @@ func authorizeInventory(
 ) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			base := "/api/public/v1/products"
-			if r.URL.Path != base && !strings.HasPrefix(r.URL.Path, base+"/") {
+			products := "/api/public/v1/products"
+			inventories := "/api/public/v1/inventories"
+			isProducts := r.URL.Path == products || strings.HasPrefix(r.URL.Path, products+"/")
+			isInventories := r.URL.Path == inventories || strings.HasPrefix(r.URL.Path, inventories+"/")
+			if !isProducts && !isInventories {
 				next.ServeHTTP(w, r)
 				return
 			}
@@ -90,37 +93,56 @@ func authorizeInventory(
 			}
 			ctx, cancel := context.WithTimeout(r.Context(), 3*time.Second)
 			defer cancel()
-			resolved, err := sessions.ResolveSession(ctx, &sessionapi.ResolveSessionRequest{Token: cookie.Value})
-			if status.Code(err) == codes.Unauthenticated || status.Code(err) == codes.InvalidArgument {
-				http.Error(w, "unauthorized", http.StatusUnauthorized)
+			userID, httpStatus := resolveUser(ctx, sessions, cookie.Value)
+			if httpStatus != 0 {
+				http.Error(w, http.StatusText(httpStatus), httpStatus)
 				return
 			}
-			if err != nil || resolved == nil {
-				http.Error(w, "authentication unavailable", http.StatusServiceUnavailable)
-				return
+			if r.Method != http.MethodGet {
+				if !validOrigin(r) {
+					http.Error(w, "forbidden", http.StatusForbidden)
+					return
+				}
+				if isProducts && !authorizeWrite(ctx, w, cookie.Value, authz) {
+					return
+				}
 			}
-			userID, err := uuid.Parse(resolved.GetUserId())
-			if err != nil || userID == uuid.Nil() {
-				http.Error(w, "authentication unavailable", http.StatusServiceUnavailable)
-				return
-			}
-			if r.Method != http.MethodGet && !authorizeWrite(ctx, w, r, cookie.Value, authz) {
-				return
-			}
-			next.ServeHTTP(w, r)
+			next.ServeHTTP(w, r.WithContext(context.WithValue(r.Context(), userIDKey{}, userID)))
 		})
 	}
 }
 
-func authorizeWrite(ctx context.Context, w http.ResponseWriter, r *http.Request,
-	token string, authz authzapi.AuthzServiceClient) bool {
+func resolveUser(
+	ctx context.Context,
+	sessions sessionapi.SessionServiceClient,
+	token string,
+) (id uuid.UUID, httpStatus int) {
+	resolved, err := sessions.ResolveSession(ctx, &sessionapi.ResolveSessionRequest{Token: token})
+	if status.Code(err) == codes.Unauthenticated || status.Code(err) == codes.InvalidArgument {
+		return uuid.Nil(), http.StatusUnauthorized
+	}
+	if err != nil || resolved == nil {
+		return uuid.Nil(), http.StatusServiceUnavailable
+	}
+	userID, err := uuid.Parse(resolved.GetUserId())
+	if err != nil || userID == uuid.Nil() {
+		return uuid.Nil(), http.StatusServiceUnavailable
+	}
+	return userID, 0
+}
+
+type userIDKey struct{}
+
+func validOrigin(r *http.Request) bool {
 	if origin := r.Header.Get("Origin"); origin != "" {
 		parsed, err := url.Parse(origin)
-		if err != nil || parsed.Host != r.Host {
-			http.Error(w, "forbidden", http.StatusForbidden)
-			return false
-		}
+		return err == nil && parsed.Host == r.Host && (parsed.Scheme == "http" || parsed.Scheme == "https")
 	}
+	return true
+}
+
+func authorizeWrite(ctx context.Context, w http.ResponseWriter,
+	token string, authz authzapi.AuthzServiceClient) bool {
 	ctx = metadata.NewOutgoingContext(ctx, metadata.Pairs("session", token))
 	response, err := authz.IsSuperuser(ctx, &authzapi.IsSuperuserRequest{})
 	if status.Code(err) == codes.Unauthenticated {

@@ -4,8 +4,12 @@ package migrations_test
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"log/slog"
+	"net/http"
+	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 	"uuid"
@@ -13,17 +17,22 @@ import (
 	"github.com/distributed-programming-2026/go-sdk/pkg/migrator"
 	"github.com/distributed-programming-2026/go-sdk/pkg/mysql"
 	"github.com/distributed-programming-2026/go-sdk/pkg/uow"
+	"github.com/go-chi/chi/v5"
 	"github.com/stretchr/testify/require"
 	tcmysql "github.com/testcontainers/testcontainers-go/modules/mysql"
+	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 
+	authzapi "authz/api/server/internalapi"
 	internalapi "inventory/api/server/internalapi"
 	"inventory/internal/inventory/app"
 	"inventory/internal/inventory/domain"
 	internalhandler "inventory/internal/inventory/infra/handlers/internalapi"
+	publichandler "inventory/internal/inventory/infra/handlers/public"
 	inventorymysql "inventory/internal/inventory/infra/mysql"
 	"inventory/internal/inventory/infra/mysql/migrations"
+	sessionapi "session/api/server/internalapi"
 )
 
 func TestMultipleInventoryMigrationAndReservations(t *testing.T) {
@@ -232,8 +241,8 @@ func TestMultipleInventoryMigrationAndReservations(t *testing.T) {
 	stock, err = service.GetStock(ctx, newInventory.ID(), productID)
 	require.NoError(t, err)
 	require.EqualValues(t, 3, stock.Quantity)
-	grpc := internalhandler.NewHandler(service, slog.Default())
-	response, err := grpc.GetStock(ctx, &internalapi.GetStockRequest{
+	grpcHandler := internalhandler.NewHandler(service, slog.Default())
+	response, err := grpcHandler.GetStock(ctx, &internalapi.GetStockRequest{
 		InventoryId: newInventory.ID().String(), ProductId: productID.String(),
 	})
 	require.NoError(t, err)
@@ -243,19 +252,22 @@ func TestMultipleInventoryMigrationAndReservations(t *testing.T) {
 		InventoryId: newInventory.ID().String(), ReservationId: uuid.New().String(),
 		Items: []*internalapi.ReservationItem{{ProductId: productID.String(), Quantity: 2}},
 	}
-	_, err = grpc.Reserve(ctx, reservation)
+	_, err = grpcHandler.Reserve(ctx, reservation)
 	require.NoError(t, err)
-	_, err = grpc.Reserve(ctx, reservation)
+	_, err = grpcHandler.Reserve(ctx, reservation)
 	require.NoError(t, err)
-	_, err = grpc.Consume(ctx, &internalapi.ReservationRequest{
+	_, err = grpcHandler.Consume(ctx, &internalapi.ReservationRequest{
 		InventoryId: newInventory.ID().String(), ReservationId: reservation.ReservationId,
 	})
 	require.NoError(t, err)
-	_, err = grpc.Reserve(ctx, reservation)
+	_, err = grpcHandler.Reserve(ctx, reservation)
 	require.Equal(t, codes.FailedPrecondition, status.Code(err))
-	_, err = grpc.GetStock(ctx, &internalapi.GetStockRequest{InventoryId: "invalid", ProductId: productID.String()})
+	_, err = grpcHandler.GetStock(
+		ctx,
+		&internalapi.GetStockRequest{InventoryId: "invalid", ProductId: productID.String()},
+	)
 	require.Equal(t, codes.InvalidArgument, status.Code(err))
-	_, err = grpc.Release(ctx, &internalapi.ReservationRequest{
+	_, err = grpcHandler.Release(ctx, &internalapi.ReservationRequest{
 		InventoryId: uuid.New().String(), ReservationId: uuid.New().String(),
 	})
 	require.Equal(t, codes.NotFound, status.Code(err))
@@ -295,6 +307,112 @@ func TestMultipleInventoryMigrationAndReservations(t *testing.T) {
 	isOwner, err = service.IsInventoryOwner(ctx, ownerID, rolledBackID)
 	require.NoError(t, err)
 	require.False(t, isOwner)
+
+	testPublicHTTP(t, service, ownerID, strangerID, legacyID, owned.ID(), productID)
+}
+
+func testPublicHTTP(t *testing.T, service *app.Service, ownerID, strangerID, legacyID, ownedID, productID uuid.UUID) {
+	t.Helper()
+	router := chi.NewRouter()
+	register, err := publichandler.Register(service, slog.Default(), testSessions{users: map[string]uuid.UUID{
+		"owner": ownerID, "stranger": strangerID,
+	}}, testAuthz{})
+	require.NoError(t, err)
+	require.NoError(t, register(router))
+	request := func(method, path, token, body, origin string) *httptest.ResponseRecorder {
+		req := httptest.NewRequest(method, path, strings.NewReader(body))
+		if body != "" {
+			req.Header.Set("Content-Type", "application/json")
+		}
+		if token != "" {
+			req.AddCookie(
+				&http.Cookie{
+					Name:     "session",
+					Value:    token,
+					Secure:   true,
+					HttpOnly: true,
+					SameSite: http.SameSiteStrictMode,
+				},
+			)
+		}
+		if origin != "" {
+			req.Header.Set("Origin", origin)
+		}
+		req.Header.Set("X-User-ID", ownerID.String())
+		response := httptest.NewRecorder()
+		router.ServeHTTP(response, req)
+		return response
+	}
+	base := "/api/public/v1/inventories/" + ownedID.String()
+	created := request("POST", "/api/public/v1/inventories", "owner", `{"name":"Морозилка"}`, "")
+	require.Equal(t, http.StatusCreated, created.Code)
+	var createdInventory struct {
+		ID string `json:"id"`
+	}
+	require.NoError(t, json.Unmarshal(created.Body.Bytes(), &createdInventory))
+	require.NotEmpty(t, createdInventory.ID)
+	require.Equal(
+		t,
+		http.StatusNotFound,
+		request("GET", "/api/public/v1/inventories/"+createdInventory.ID, "stranger", "", "").Code,
+	)
+	list := request("GET", "/api/public/v1/inventories", "stranger", "", "")
+	require.Equal(t, http.StatusOK, list.Code)
+	require.NotContains(t, list.Body.String(), createdInventory.ID)
+	require.Equal(t, http.StatusUnauthorized, request("GET", base, "", "", "").Code)
+	require.Equal(t, http.StatusNotFound, request("GET", base, "stranger", "", "").Code)
+	require.Equal(
+		t,
+		http.StatusNotFound,
+		request("GET", "/api/public/v1/inventories/"+legacyID.String(), "owner", "", "").Code,
+	)
+	require.Equal(t, http.StatusOK, request("GET", base, "owner", "", "").Code)
+	stockPath := base + "/stocks/" + productID.String()
+	httpResponse := request("GET", stockPath, "owner", "", "")
+	require.Equal(t, http.StatusOK, httpResponse.Code)
+	require.Contains(t, httpResponse.Body.String(), `"exists":false`)
+	require.Equal(
+		t,
+		http.StatusForbidden,
+		request("POST", stockPath+"/add", "owner", `{"quantity":5}`, "https://example.org").Code,
+	)
+	require.Equal(t, http.StatusNotFound, request("POST", stockPath+"/add", "stranger", `{"quantity":5}`, "").Code)
+	require.Equal(t, http.StatusNoContent, request("POST", stockPath+"/add", "owner", `{"quantity":5}`, "").Code)
+	httpResponse = request("GET", stockPath, "owner", "", "")
+	require.Equal(t, http.StatusOK, httpResponse.Code)
+	require.Contains(t, httpResponse.Body.String(), `"quantity":5`)
+	require.Equal(
+		t,
+		http.StatusForbidden,
+		request("POST", "/api/public/v1/products", "owner", `{"name":"чай","unit":"g"}`, "").Code,
+	)
+}
+
+type testSessions struct {
+	sessionapi.SessionServiceClient
+	users map[string]uuid.UUID
+}
+
+func (s testSessions) ResolveSession(
+	_ context.Context,
+	req *sessionapi.ResolveSessionRequest,
+	_ ...grpc.CallOption,
+) (*sessionapi.ResolveSessionResponse, error) {
+	id, ok := s.users[req.GetToken()]
+	if !ok {
+		return nil, status.Error(codes.Unauthenticated, "invalid session")
+	}
+	return &sessionapi.ResolveSessionResponse{UserId: id.String()}, nil
+}
+
+type testAuthz struct{ authzapi.AuthzServiceClient }
+
+func (testAuthz) IsSuperuser(
+	context.Context,
+	*authzapi.IsSuperuserRequest,
+	...grpc.CallOption,
+) (*authzapi.IsSuperuserResponse, error) {
+	return &authzapi.IsSuperuserResponse{IsSuperuser: false}, nil
 }
 
 func TestCleanMigrationDoesNotCreateDefaultInventory(t *testing.T) {

@@ -45,7 +45,7 @@ func (h handler) ListProducts(
 	}
 	response := publicapi.ListProducts200JSONResponse{Products: make([]publicapi.Product, 0, len(products))}
 	for _, product := range products {
-		response.Products = append(response.Products, productResponse(product))
+		response.Products = append(response.Products, productResponse(*product))
 	}
 	return response, nil
 }
@@ -84,50 +84,11 @@ func (h handler) GetProduct(
 	return publicapi.GetProduct200JSONResponse(productResponse(*product)), nil
 }
 
-func (h handler) GetStock(
-	ctx context.Context,
-	req publicapi.GetStockRequestObject,
-) (publicapi.GetStockResponseObject, error) {
-	stock, err := h.svc.GetStock(ctx, uuid.UUID(req.Id))
-	if errors.Is(err, domain.ErrProductNotFound) {
-		return publicapi.GetStock404Response{}, nil
-	}
-	if err != nil {
-		return nil, err
-	}
-	return publicapi.GetStock200JSONResponse{
-		ProductId:        openapitypes.UUID(stock.ProductID),
-		Quantity:         stock.Quantity,
-		ReservedQuantity: stock.ReservedQuantity,
-		Available:        stock.Available(),
-	}, nil
-}
-
-func (h handler) AddStock(
-	ctx context.Context,
-	req publicapi.AddStockRequestObject,
-) (publicapi.AddStockResponseObject, error) {
-	if req.Body == nil {
-		return publicapi.AddStock400Response{}, nil
-	}
-	err := h.svc.AddStock(ctx, uuid.UUID(req.Id), req.Body.Quantity)
-	if errors.Is(err, domain.ErrInvalidStock) {
-		return publicapi.AddStock400Response{}, nil
-	}
-	if errors.Is(err, domain.ErrProductNotFound) {
-		return publicapi.AddStock404Response{}, nil
-	}
-	if err != nil {
-		return nil, err
-	}
-	return publicapi.AddStock204Response{}, nil
-}
-
 func productResponse(product domain.Product) publicapi.Product {
 	return publicapi.Product{
-		Id:   openapitypes.UUID(product.ID),
-		Name: product.Name,
-		Unit: string(product.Unit),
+		Id:   openapitypes.UUID(product.ID()),
+		Name: product.Name(),
+		Unit: string(product.Unit()),
 	}
 }
 
@@ -140,4 +101,268 @@ func (h handler) Echo(ctx context.Context, req publicapi.EchoRequestObject) (pub
 	return publicapi.Echo200JSONResponse{
 		OperationID: id.String(),
 	}, nil
+}
+
+func userID(ctx context.Context) uuid.UUID {
+	id, _ := ctx.Value(userIDKey{}).(uuid.UUID)
+	return id
+}
+
+func (h handler) owns(ctx context.Context, id uuid.UUID) (bool, error) {
+	return h.svc.IsInventoryOwner(ctx, userID(ctx), id)
+}
+
+func inventoryResponse(inventory *domain.Inventory) publicapi.Inventory {
+	return publicapi.Inventory{Id: openapitypes.UUID(inventory.ID()), Name: inventory.Name()}
+}
+
+func stockResponse(stock domain.Stock) publicapi.Stock {
+	return publicapi.Stock{ProductId: openapitypes.UUID(stock.ProductID), Exists: true,
+		Quantity: stock.Quantity, ReservedQuantity: stock.ReservedQuantity, Available: stock.Available()}
+}
+
+func (h handler) ListInventories(
+	ctx context.Context,
+	_ publicapi.ListInventoriesRequestObject,
+) (publicapi.ListInventoriesResponseObject, error) {
+	if userID(ctx) == uuid.Nil() {
+		return publicapi.ListInventories401Response{}, nil
+	}
+	inventories, err := h.svc.ListOwnedInventories(ctx, userID(ctx))
+	if err != nil {
+		return nil, err
+	}
+	result := publicapi.ListInventories200JSONResponse{Inventories: make([]publicapi.Inventory, 0, len(inventories))}
+	for _, inventory := range inventories {
+		result.Inventories = append(result.Inventories, inventoryResponse(inventory))
+	}
+	return result, nil
+}
+
+func (h handler) CreateInventory(
+	ctx context.Context,
+	req publicapi.CreateInventoryRequestObject,
+) (publicapi.CreateInventoryResponseObject, error) {
+	if userID(ctx) == uuid.Nil() {
+		return publicapi.CreateInventory401Response{}, nil
+	}
+	if req.Body == nil {
+		return publicapi.CreateInventory400Response{}, nil
+	}
+	inventory, err := h.svc.CreateOwnedInventory(ctx, userID(ctx), req.Body.Name)
+	if errors.Is(err, domain.ErrInvalidInventory) {
+		return publicapi.CreateInventory400Response{}, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	return publicapi.CreateInventory201JSONResponse(inventoryResponse(inventory)), nil
+}
+
+func (h handler) GetInventory(
+	ctx context.Context,
+	req publicapi.GetInventoryRequestObject,
+) (publicapi.GetInventoryResponseObject, error) {
+	id := uuid.UUID(req.InventoryId)
+	owned, err := h.owns(ctx, id)
+	if err != nil {
+		return nil, err
+	}
+	if !owned {
+		return publicapi.GetInventory404Response{}, nil
+	}
+	inventory, err := h.svc.GetInventory(ctx, id)
+	if errors.Is(err, domain.ErrInventoryNotFound) {
+		return publicapi.GetInventory404Response{}, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	return publicapi.GetInventory200JSONResponse(inventoryResponse(inventory)), nil
+}
+
+func (h handler) RenameInventory(
+	ctx context.Context,
+	req publicapi.RenameInventoryRequestObject,
+) (publicapi.RenameInventoryResponseObject, error) {
+	if req.Body == nil {
+		return publicapi.RenameInventory400Response{}, nil
+	}
+	id := uuid.UUID(req.InventoryId)
+	owned, err := h.owns(ctx, id)
+	if err != nil {
+		return nil, err
+	}
+	if !owned {
+		return publicapi.RenameInventory404Response{}, nil
+	}
+	err = h.svc.RenameInventory(ctx, id, req.Body.Name)
+	if errors.Is(err, domain.ErrInvalidInventoryName) {
+		return publicapi.RenameInventory400Response{}, nil
+	}
+	if errors.Is(err, domain.ErrInventoryNotFound) {
+		return publicapi.RenameInventory404Response{}, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	return publicapi.RenameInventory204Response{}, nil
+}
+
+func (h handler) ListStocks(
+	ctx context.Context,
+	req publicapi.ListStocksRequestObject,
+) (publicapi.ListStocksResponseObject, error) {
+	id := uuid.UUID(req.InventoryId)
+	owned, err := h.owns(ctx, id)
+	if err != nil {
+		return nil, err
+	}
+	if !owned {
+		return publicapi.ListStocks404Response{}, nil
+	}
+	stocks, err := h.svc.ListStocks(ctx, id)
+	if errors.Is(err, domain.ErrInventoryNotFound) {
+		return publicapi.ListStocks404Response{}, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	result := publicapi.ListStocks200JSONResponse{Stocks: make([]publicapi.Stock, 0, len(stocks))}
+	for _, stock := range stocks {
+		result.Stocks = append(result.Stocks, stockResponse(stock))
+	}
+	return result, nil
+}
+
+func (h handler) GetStock(
+	ctx context.Context,
+	req publicapi.GetStockRequestObject,
+) (publicapi.GetStockResponseObject, error) {
+	inventoryID, productID := uuid.UUID(req.InventoryId), uuid.UUID(req.ProductId)
+	owned, err := h.owns(ctx, inventoryID)
+	if err != nil {
+		return nil, err
+	}
+	if !owned {
+		return publicapi.GetStock404Response{}, nil
+	}
+	stock, err := h.svc.GetStock(ctx, inventoryID, productID)
+	if errors.Is(err, domain.ErrInventoryNotFound) || errors.Is(err, domain.ErrProductNotFound) {
+		return publicapi.GetStock404Response{}, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	if stock == nil {
+		return publicapi.GetStock200JSONResponse{ProductId: req.ProductId}, nil
+	}
+	return publicapi.GetStock200JSONResponse(stockResponse(*stock)), nil
+}
+
+func (h handler) CreateStock(
+	ctx context.Context,
+	req publicapi.CreateStockRequestObject,
+) (publicapi.CreateStockResponseObject, error) {
+	inventoryID := uuid.UUID(req.InventoryId)
+	owned, err := h.owns(ctx, inventoryID)
+	if err != nil {
+		return nil, err
+	}
+	if !owned {
+		return publicapi.CreateStock404Response{}, nil
+	}
+	err = h.svc.CreateStock(ctx, inventoryID, uuid.UUID(req.ProductId))
+	if errors.Is(err, domain.ErrStockExists) {
+		return publicapi.CreateStock409Response{}, nil
+	}
+	if errors.Is(err, domain.ErrInventoryNotFound) || errors.Is(err, domain.ErrProductNotFound) {
+		return publicapi.CreateStock404Response{}, nil
+	}
+	if errors.Is(err, domain.ErrInvalidStock) {
+		return publicapi.CreateStock400Response{}, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	return publicapi.CreateStock201Response{}, nil
+}
+
+func (h handler) AddStock(
+	ctx context.Context,
+	req publicapi.AddStockRequestObject,
+) (publicapi.AddStockResponseObject, error) {
+	if req.Body == nil {
+		return publicapi.AddStock400Response{}, nil
+	}
+	inventoryID := uuid.UUID(req.InventoryId)
+	owned, err := h.owns(ctx, inventoryID)
+	if err != nil {
+		return nil, err
+	}
+	if !owned {
+		return publicapi.AddStock404Response{}, nil
+	}
+	err = h.svc.AddStock(ctx, inventoryID, uuid.UUID(req.ProductId), req.Body.Quantity)
+	if errors.Is(err, domain.ErrInvalidStock) {
+		return publicapi.AddStock400Response{}, nil
+	}
+	if errors.Is(err, domain.ErrInventoryNotFound) || errors.Is(err, domain.ErrProductNotFound) {
+		return publicapi.AddStock404Response{}, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	return publicapi.AddStock204Response{}, nil
+}
+
+func (h handler) RemoveStock(
+	ctx context.Context,
+	req publicapi.RemoveStockRequestObject,
+) (publicapi.RemoveStockResponseObject, error) {
+	if req.Body == nil {
+		return publicapi.RemoveStock400Response{}, nil
+	}
+	inventoryID := uuid.UUID(req.InventoryId)
+	owned, err := h.owns(ctx, inventoryID)
+	if err != nil {
+		return nil, err
+	}
+	if !owned {
+		return publicapi.RemoveStock404Response{}, nil
+	}
+	err = h.svc.RemoveStock(ctx, inventoryID, uuid.UUID(req.ProductId), req.Body.Quantity)
+	if errors.Is(err, domain.ErrInvalidQuantityToRemove) {
+		return publicapi.RemoveStock400Response{}, nil
+	}
+	if errors.Is(err, domain.ErrInsufficientStock) {
+		return publicapi.RemoveStock409Response{}, nil
+	}
+	if errors.Is(err, domain.ErrInventoryNotFound) || errors.Is(err, domain.ErrProductNotFound) {
+		return publicapi.RemoveStock404Response{}, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	return publicapi.RemoveStock204Response{}, nil
+}
+
+func (h handler) RenameProduct(
+	ctx context.Context,
+	req publicapi.RenameProductRequestObject,
+) (publicapi.RenameProductResponseObject, error) {
+	if req.Body == nil {
+		return publicapi.RenameProduct400Response{}, nil
+	}
+	err := h.svc.RenameProduct(ctx, uuid.UUID(req.Id), req.Body.Name)
+	if errors.Is(err, domain.ErrInvalidProduct) {
+		return publicapi.RenameProduct400Response{}, nil
+	}
+	if errors.Is(err, domain.ErrProductNotFound) {
+		return publicapi.RenameProduct404Response{}, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	return publicapi.RenameProduct204Response{}, nil
 }
