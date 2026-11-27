@@ -79,3 +79,33 @@ func TestPlanRequiresOwnerAndName(t *testing.T) {
 	require.NoError(t, plan.Rename("Week"))
 	require.Equal(t, "Week", plan.Name())
 }
+
+func TestAllocationMustAccountForAllIngredients(t *testing.T) {
+	product, inventory, revision := uuid.New(), uuid.New(), uuid.New()
+	item, err := NewItem(
+		ItemData{
+			ID:             uuid.New(),
+			PlanID:         uuid.New(),
+			Kind:           Product,
+			ScheduledAt:    time.Now(),
+			Ingredients:    []Ingredient{{ProductID: product, Quantity: 5}},
+			InventoryIDs:   []uuid.UUID{inventory},
+			ShoppingListID: uuid.New(),
+			Revision:       revision,
+		},
+	)
+	require.NoError(t, err)
+	_, err = item.ApplyAllocation(revision, 1, nil, nil)
+	require.ErrorIs(t, err, ErrInvalidItem)
+	lines := []AllocationLine{{InventoryID: inventory, ReservationID: uuid.New(), ProductID: product, Quantity: 3}}
+	_, err = item.ApplyAllocation(revision, 1, lines, []Ingredient{{ProductID: product, Quantity: 1}})
+	require.ErrorIs(t, err, ErrInvalidItem)
+	changed, err := item.ApplyAllocation(revision, 1, lines, []Ingredient{{ProductID: product, Quantity: 2}})
+	require.NoError(t, err)
+	require.True(t, changed)
+	lines[0].Quantity = 99
+	require.EqualValues(t, 3, item.Data().Allocations[0].Quantity)
+	restored, err := RestoreItem(item.Data())
+	require.NoError(t, err)
+	require.Equal(t, item.Data(), restored.Data())
+}

@@ -38,6 +38,13 @@ type Ingredient struct {
 	Quantity  int64
 }
 
+type AllocationLine struct {
+	InventoryID   uuid.UUID
+	ReservationID uuid.UUID
+	ProductID     uuid.UUID
+	Quantity      int64
+}
+
 type RecipeSnapshot struct {
 	RecipeID     uuid.UUID
 	Name         string
@@ -64,6 +71,7 @@ type ItemData struct {
 	ReservationVersion uint64
 	State              ItemState
 	Shortages          []Ingredient
+	Allocations        []AllocationLine
 }
 
 type Item struct{ data ItemData }
@@ -103,6 +111,7 @@ func NewItem(data ItemData) (*Item, error) {
 		func(i, j int) bool { return data.InventoryIDs[i].String() < data.InventoryIDs[j].String() },
 	)
 	data.Shortages = nil
+	data.Allocations = nil
 	data.State = Planning
 	data.ReservationVersion = 0
 	data.ScheduledAt = data.ScheduledAt.UTC()
@@ -138,9 +147,21 @@ func RestoreItem(data ItemData) (*Item, error) {
 			return nil, ErrInvalidItem
 		}
 	}
+	if len(data.Allocations) > 0 {
+		check, err := NewItem(data)
+		if err != nil {
+			return nil, err
+		}
+		changed, err := check.ApplyAllocation(data.Revision, 1, data.Allocations, data.Shortages)
+		if err != nil || !changed {
+			return nil, ErrInvalidItem
+		}
+	}
+	item.data.Allocations = append([]AllocationLine(nil), data.Allocations...)
 	item.data.State = data.State
 	item.data.ReservationVersion = data.ReservationVersion
 	item.data.Shortages = append([]Ingredient(nil), data.Shortages...)
+	data.Allocations = append([]AllocationLine(nil), data.Allocations...)
 	return item, nil
 }
 
@@ -228,4 +249,66 @@ func (i *Item) ConfirmCancellation(revision uuid.UUID) bool {
 	}
 	i.data.State = Cancelled
 	return true
+}
+
+// ApplyAllocation verifies that reserved and missing quantities account for the snapshot.
+func (i *Item) ApplyAllocation(
+	revision uuid.UUID,
+	version uint64,
+	allocations []AllocationLine,
+	shortages []Ingredient,
+) (bool, error) {
+	if revision != i.data.Revision || version <= i.data.ReservationVersion {
+		return false, nil
+	}
+	if i.data.State != Planning && i.data.State != Missing && i.data.State != Ready {
+		return false, nil
+	}
+	remaining := make(map[uuid.UUID]int64, len(i.data.Ingredients))
+	for _, ingredient := range i.data.Ingredients {
+		remaining[ingredient.ProductID] = ingredient.Quantity
+	}
+	allowed := make(map[uuid.UUID]bool, len(i.data.InventoryIDs))
+	for _, inventoryID := range i.data.InventoryIDs {
+		allowed[inventoryID] = true
+	}
+	type pair struct{ inventory, product uuid.UUID }
+	seen := make(map[pair]bool)
+	reservationByInventory := make(map[uuid.UUID]uuid.UUID)
+	for _, line := range allocations {
+		key := pair{line.InventoryID, line.ProductID}
+		quantity, ok := remaining[line.ProductID]
+		if !allowed[line.InventoryID] || line.ReservationID == uuid.Nil() || line.Quantity <= 0 || !ok ||
+			line.Quantity > quantity ||
+			seen[key] {
+			return false, ErrInvalidItem
+		}
+		if previous, ok := reservationByInventory[line.InventoryID]; ok && previous != line.ReservationID {
+			return false, ErrInvalidItem
+		}
+		reservationByInventory[line.InventoryID] = line.ReservationID
+		remaining[line.ProductID] -= line.Quantity
+		seen[key] = true
+	}
+	if len(shortages) > 0 && !validIngredients(shortages) {
+		return false, ErrInvalidItem
+	}
+	for _, shortage := range shortages {
+		quantity, ok := remaining[shortage.ProductID]
+		if !ok || shortage.Quantity != quantity {
+			return false, ErrInvalidItem
+		}
+		remaining[shortage.ProductID] = 0
+	}
+	for _, quantity := range remaining {
+		if quantity != 0 {
+			return false, ErrInvalidItem
+		}
+	}
+	changed, err := i.ApplyReservation(revision, version, shortages)
+	if err != nil || !changed {
+		return changed, err
+	}
+	i.data.Allocations = append([]AllocationLine(nil), allocations...)
+	return true, nil
 }

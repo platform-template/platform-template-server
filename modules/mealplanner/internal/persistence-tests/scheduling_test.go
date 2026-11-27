@@ -132,4 +132,5 @@ func testScheduling(
 		client.QueryRowContext(ctx, "test.outbox.count", `SELECT COUNT(*) FROM event_outbox`).Scan(&countAfter),
 	)
 	require.Equal(t, countBefore, countAfter)
+	testAllocationInbox(ctx, t, client, unit, base, owner, item)
 }

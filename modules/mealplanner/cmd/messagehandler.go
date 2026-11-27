@@ -32,18 +32,18 @@ func messageHandler(ctx context.Context, logger *slog.Logger, conf config.Env) (
 		err = errors.Join(err, db.connector.Close())
 	}()
 
-	handler, err := newMessageHandler(logger, conf, db)
+	consumerCtx, cancel := context.WithCancel(ctx)
+	defer cancel()
+	connection := newConnection(logger, conf)
+	defer func() { err = errors.Join(err, connection.Stop()) }()
+	dispatcher, _, err := newDispatcher(logger, conf, db, connection)
 	if err != nil {
 		return err
 	}
-
-	consumerCtx, cancel := context.WithCancel(ctx)
-	defer cancel()
-
-	connection := newConnection(logger, conf)
-	defer func() {
-		err = errors.Join(err, connection.Stop())
-	}()
+	handler, err := newMessageHandler(logger, conf, db, dispatcher)
+	if err != nil {
+		return err
+	}
 
 	consumer := connection.Consumer(
 		consumerCtx,
