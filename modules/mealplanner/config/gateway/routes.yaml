@@ -1,0 +1,14 @@
+kind: gateway/service/v1
+name: mealplanner
+weight: 100
+routes:
+  - pattern: '^/mealplanner/api/.*$'
+    rewrite:
+      old: '^/mealplanner/(.*)$'
+      new: '/$1'
+    target: mealplanner-service:8082
+    interceptors:
+      - id: mealplanner-interceptor
+        processingMode:
+          requestHeaders: true
+          responseHeaders: true
