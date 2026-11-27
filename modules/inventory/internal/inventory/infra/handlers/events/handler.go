@@ -21,7 +21,7 @@ type allocator interface {
 	AllocateMeal(context.Context, app.MealAllocation) error
 	CancelMealAllocation(context.Context, domain.AllocationIdentity) error
 	CompleteMealAllocation(context.Context, domain.AllocationIdentity) error
-	ReplenishStock(context.Context, uuid.UUID, uuid.UUID, uuid.UUID, int64) error
+	ReplenishStock(context.Context, uuid.UUID, uuid.UUID, uuid.UUID, uuid.UUID, int64) error
 }
 type handler struct {
 	logger    *slog.Logger
@@ -131,7 +131,14 @@ func (h *handler) replenish(ctx context.Context, envelope event.Envelope) error 
 	if payload.Quantity <= 0 {
 		return fmt.Errorf("invalid purchase quantity")
 	}
-	return h.allocator.ReplenishStock(app.WithActor(ctx, actorID), purchaseID, inventoryID, productID, payload.Quantity)
+	return h.allocator.ReplenishStock(
+		ctx,
+		purchaseID,
+		inventoryID,
+		productID,
+		actorID,
+		payload.Quantity,
+	)
 }
 
 func (h *handler) complete(ctx context.Context, envelope event.Envelope) error {

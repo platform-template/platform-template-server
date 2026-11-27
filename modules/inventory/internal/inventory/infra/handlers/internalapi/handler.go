@@ -177,7 +177,13 @@ func (h handler) Replenish(
 	if err != nil {
 		return nil, err
 	}
-	if err := h.svc.ReplenishStock(ctx, operationID, inventoryID, productID, req.GetQuantity()); err != nil {
+	if err := h.svc.ReplenishStock(
+		ctx,
+		operationID,
+		inventoryID,
+		productID,
+		uuid.Nil(),
+		req.GetQuantity()); err != nil {
 		return nil, h.operationError(ctx, err)
 	}
 	return &inventoryinternalapi.OperationResponse{}, nil

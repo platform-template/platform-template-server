@@ -253,9 +253,9 @@ func testMealInbox(
 		InventoryIds: []string{inventory.ID().String()},
 		Ingredients:  []*mealplannerevents.MealIngredient{{ProductId: product.ID().String(), Quantity: 2}},
 	}
-	allocation, err := event.New(ctx, "mealplanner", "MealPlanningRequested", completeRequest)
+	allocationEnvelope, err := event.New(ctx, "mealplanner", "MealPlanningRequested", completeRequest)
 	require.NoError(t, err)
-	require.NoError(t, wrapped.Handle(ctx, allocation))
+	require.NoError(t, wrapped.Handle(ctx, allocationEnvelope))
 	var outboxBefore, outboxAfter int
 	require.NoError(t, client.QueryRowContext(ctx, "test.outbox.count", `SELECT COUNT(*) FROM event_outbox`).Scan(&outboxBefore))
 	completion, err := event.New(ctx, "mealplanner", "MealCompletionRequested", &mealplannerevents.MealCompletionRequested{

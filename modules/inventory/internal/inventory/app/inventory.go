@@ -257,34 +257,37 @@ func (s *Service) AddStock(ctx context.Context, inventoryID, productID uuid.UUID
 	return nil
 }
 
-// ReplenishStock applies a trusted external purchase exactly once. The operation ID
-// is persisted with the stock update, so RabbitMQ redelivery cannot add stock twice.
 func (s *Service) ReplenishStock(
 	ctx context.Context,
-	operationID, inventoryID, productID uuid.UUID,
+	operationID, inventoryID, productID, actor uuid.UUID,
 	quantity int64,
 ) error {
 	err := s.unit.ExecuteWithRepositoryProvider(ctx, func(p *mysql.RepositoryProvider) error {
 		if err := requireResources(ctx, p, inventoryID, productID); err != nil {
 			return err
 		}
+
 		changed, err := p.Stock(ctx).Replenish(operationID, inventoryID, productID, quantity)
 		if err != nil || !changed {
 			return err
 		}
-		return s.dispatch(
-			ctx,
-			&inventoryevents.StockAdjusted{
-				InventoryId:   inventoryID.String(),
-				ProductId:     productID.String(),
-				QuantityDelta: quantity,
-				ActorId:       actorID(ctx),
-			},
-		)
+
+		actorID := ""
+		if actor != uuid.Nil() {
+			actorID = actor.String()
+		}
+
+		return s.dispatch(ctx, &inventoryevents.StockAdjusted{
+			InventoryId:   inventoryID.String(),
+			ProductId:     productID.String(),
+			QuantityDelta: quantity,
+			ActorId:       actorID,
+		})
 	})
 	if err != nil {
 		return fmt.Errorf("replenish stock: %w", err)
 	}
+
 	return nil
 }
 
