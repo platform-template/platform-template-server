@@ -14,6 +14,7 @@ var (
 	ErrRecipeArchived   = errors.New("recipe archived")
 	ErrInvalidServings  = errors.New("invalid servings")
 	ErrQuantityOverflow = errors.New("scaled ingredient quantity overflows")
+	ErrProductNotFound  = errors.New("ingredient product not found")
 )
 
 type Ingredient struct {
@@ -118,4 +119,10 @@ type RecipeRepository interface {
 	Update(*Recipe) error
 	GetByID(uuid.UUID) (*Recipe, error)
 	List(RecipeFilter) ([]*Recipe, error)
+	ListByOwner(uuid.UUID, RecipeFilter) ([]*Recipe, error)
+}
+
+type RecipeOwnership interface {
+	Create(recipeID, userID uuid.UUID) error
+	IsOwner(recipeID, userID uuid.UUID) (bool, error)
 }

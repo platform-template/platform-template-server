@@ -16,18 +16,25 @@ type DispatcherFactory interface {
 	NewDispatcher(ctx context.Context) domainevent.Dispatcher
 }
 
+type Catalog interface {
+	ValidateProduct(context.Context, uuid.UUID) error
+}
+
 type Service struct {
 	unit              uow.UnitOfWorkWithRepositoryProvider[*mysql.RepositoryProvider]
 	dispatcherFactory DispatcherFactory
+	catalog           Catalog
 }
 
 func NewService(
 	unit uow.UnitOfWorkWithRepositoryProvider[*mysql.RepositoryProvider],
 	dispatcherFactory DispatcherFactory,
+	catalog Catalog,
 ) *Service {
 	return &Service{
 		unit:              unit,
 		dispatcherFactory: dispatcherFactory,
+		catalog:           catalog,
 	}
 }
 

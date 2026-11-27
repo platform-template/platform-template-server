@@ -26,3 +26,7 @@ func (p *RepositoryProvider) Echo(ctx context.Context) domain.EchoRepository {
 func (p *RepositoryProvider) Recipe(ctx context.Context) domain.RecipeRepository {
 	return repository.NewRecipeRepository(ctx, p.client)
 }
+
+func (p *RepositoryProvider) RecipeOwnership(ctx context.Context) domain.RecipeOwnership {
+	return repository.NewOwnershipRepository(ctx, p.client)
+}

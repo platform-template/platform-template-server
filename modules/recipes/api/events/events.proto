@@ -7,3 +7,17 @@ message Echo {
   string ID = 1;
   string Body = 2;
 }
+message RecipeCreated {
+  string recipe_id = 1;
+  string actor_id = 2;
+  string name = 3;
+}
+message RecipeRevised {
+  string recipe_id = 1;
+  string actor_id = 2;
+  string name = 3;
+}
+message RecipeArchived {
+  string recipe_id = 1;
+  string actor_id = 2;
+}

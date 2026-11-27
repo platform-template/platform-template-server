@@ -104,20 +104,31 @@ func (r *recipeRepository) GetByID(id uuid.UUID) (*domain.Recipe, error) {
 }
 
 func (r *recipeRepository) List(filter domain.RecipeFilter) ([]*domain.Recipe, error) {
+	return r.list(filter, nil)
+}
+
+func (r *recipeRepository) ListByOwner(ownerID uuid.UUID, filter domain.RecipeFilter) ([]*domain.Recipe, error) {
+	if ownerID == uuid.Nil() {
+		return nil, domain.ErrInvalidRecipe
+	}
+	return r.list(filter, &ownerID)
+}
+
+func (r *recipeRepository) list(filter domain.RecipeFilter, ownerID *uuid.UUID) ([]*domain.Recipe, error) {
 	if filter.Limit <= 0 || filter.Limit > 100 || filter.Offset < 0 {
 		return nil, domain.ErrInvalidRecipe
 	}
 	escaped := strings.NewReplacer("!", "!!", "%", "!%", "_", "!_").Replace(filter.Search)
-	rows, err := r.client.QueryContext(
-		r.ctx,
-		"recipe.list",
-		`SELECT id, name, description, instructions, servings, archived
-		FROM recipes WHERE archived = FALSE AND name COLLATE utf8mb4_0900_ai_ci LIKE ? ESCAPE '!'
-		ORDER BY name COLLATE utf8mb4_0900_ai_ci, id LIMIT ? OFFSET ?`,
-		"%"+escaped+"%",
-		filter.Limit,
-		filter.Offset,
-	)
+	query := `SELECT r.id, r.name, r.description, r.instructions, r.servings, r.archived FROM recipes r`
+	args := make([]any, 0, 4)
+	if ownerID != nil {
+		query += ` JOIN recipe_owners o ON o.recipe_id = r.id AND o.user_id = ?`
+		args = append(args, ownerID[:])
+	}
+	query += ` WHERE r.archived = FALSE AND r.name COLLATE utf8mb4_0900_ai_ci LIKE ? ESCAPE '!'
+		ORDER BY r.name COLLATE utf8mb4_0900_ai_ci, r.id LIMIT ? OFFSET ?`
+	args = append(args, "%"+escaped+"%", filter.Limit, filter.Offset)
+	rows, err := r.client.QueryContext(r.ctx, "recipe.list", query, args...)
 	if err != nil {
 		return nil, fmt.Errorf("list recipes: %w", err)
 	}

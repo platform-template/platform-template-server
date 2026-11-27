@@ -3,6 +3,7 @@ module recipes
 go 1.27.1
 
 require (
+	audit v0.0.0
 	github.com/distributed-programming-2026/go-sdk/pkg/amqp v0.0.5
 	github.com/distributed-programming-2026/go-sdk/pkg/event v0.0.5
 	github.com/distributed-programming-2026/go-sdk/pkg/logging v0.0.5
@@ -10,7 +11,7 @@ require (
 	github.com/distributed-programming-2026/go-sdk/pkg/mysql v0.0.5
 	github.com/distributed-programming-2026/go-sdk/pkg/uow v0.0.5
 	github.com/distributed-programming-2026/lib v0.0.0
-	github.com/getkin/kin-openapi v0.149.0
+	github.com/getkin/kin-openapi v0.153.0
 	github.com/go-chi/chi/v5 v5.3.2
 	github.com/go-sql-driver/mysql v1.10.1
 	github.com/kelseyhightower/envconfig v1.4.0
@@ -21,6 +22,7 @@ require (
 	golang.org/x/sync v0.22.0
 	google.golang.org/grpc v1.84.0
 	google.golang.org/protobuf v1.36.12
+	inventory v0.0.0
 )
 
 require (
@@ -60,8 +62,6 @@ require (
 	github.com/moby/sys/user v0.4.0 // indirect
 	github.com/moby/sys/userns v0.1.0 // indirect
 	github.com/moby/term v0.5.2 // indirect
-	github.com/oasdiff/yaml v0.1.1 // indirect
-	github.com/oasdiff/yaml3 v0.0.14 // indirect
 	github.com/opencontainers/go-digest v1.0.0 // indirect
 	github.com/opencontainers/image-spec v1.1.1 // indirect
 	github.com/power-devops/perfstat v0.0.0-20240221224432-82ca36839d55 // indirect
@@ -78,6 +78,7 @@ require (
 	go.opentelemetry.io/otel/metric v1.44.0 // indirect
 	go.opentelemetry.io/otel/trace v1.44.0 // indirect
 	go.yaml.in/yaml/v3 v3.0.5 // indirect
+	go.yaml.in/yaml/v4 v4.0.0 // indirect
 	golang.org/x/crypto v0.54.0 // indirect
 	golang.org/x/net v0.57.0 // indirect
 	golang.org/x/sys v0.47.0 // indirect
@@ -86,3 +87,7 @@ require (
 )
 
 replace github.com/distributed-programming-2026/lib => ../../lib
+
+replace inventory => ../inventory
+
+replace audit => ../audit

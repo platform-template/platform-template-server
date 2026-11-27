@@ -25,7 +25,10 @@ type handler struct {
 	recipesinternalapi.UnimplementedRecipesServiceServer
 }
 
-func (h handler) Echo(ctx context.Context, req *recipesinternalapi.EchoRequest) (*recipesinternalapi.EchoResponse, error) {
+func (h handler) Echo(
+	ctx context.Context,
+	req *recipesinternalapi.EchoRequest,
+) (*recipesinternalapi.EchoResponse, error) {
 	id, err := h.svc.Echo(ctx, req.Body)
 	if err != nil {
 		h.logger.ErrorContext(ctx, "echo failed", logging.Error(err))
