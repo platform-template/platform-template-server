@@ -184,6 +184,7 @@ func testRecipeApplication(ctx context.Context, t *testing.T, client mysql.Trans
 	loaded, err := service.GetRecipe(ctx, owner, recipe.Data().ID)
 	require.NoError(t, err)
 	require.Equal(t, second, loaded.Data().Ingredients[0].ProductID)
+	testRecipeSnapshot(t, service, owner, stranger, recipe.Data().ID, second)
 	require.NoError(t, service.ArchiveRecipe(ctx, owner, recipe.Data().ID))
 	require.NoError(t, service.ArchiveRecipe(ctx, owner, recipe.Data().ID))
 	_, err = service.GetRecipe(ctx, owner, recipe.Data().ID)
@@ -193,7 +194,7 @@ func testRecipeApplication(ctx context.Context, t *testing.T, client mysql.Trans
 		t,
 		client.QueryRowContext(ctx, "test.events.count", `SELECT COUNT(*) FROM event_outbox`).Scan(&count),
 	)
-	require.Equal(t, 6, count)
+	require.Equal(t, 8, count)
 	rollback := errors.New("rollback")
 	var rolledBackID uuid.UUID
 	opCtx, done := context.WithCancel(ctx)
@@ -213,6 +214,6 @@ func testRecipeApplication(ctx context.Context, t *testing.T, client mysql.Trans
 		t,
 		client.QueryRowContext(ctx, "test.events.count", `SELECT COUNT(*) FROM event_outbox`).Scan(&count),
 	)
-	require.Equal(t, 6, count)
+	require.Equal(t, 8, count)
 	testRecipeHTTP(t, service, first)
 }

@@ -5,6 +5,7 @@ option go_package = "/.;recipesinternalapi";
 
 service RecipesService {
   rpc Echo(EchoRequest) returns (EchoResponse);
+  rpc GetRecipeSnapshot(GetRecipeSnapshotRequest) returns (RecipeSnapshot);
 }
 
 message EchoRequest {
@@ -13,4 +14,27 @@ message EchoRequest {
 
 message EchoResponse {
   string OperationID = 1;
+}
+
+// The caller supplies the authenticated user on whose behalf the recipe is read.
+// This endpoint is intended for the trusted service network.
+message GetRecipeSnapshotRequest {
+  string user_id = 1;
+  string recipe_id = 2;
+  int64 servings = 3;
+}
+
+message RecipeIngredient {
+  string product_id = 1;
+  int64 quantity = 2;
+}
+
+// A copy of the recipe scaled to the requested number of servings.
+message RecipeSnapshot {
+  string recipe_id = 1;
+  string name = 2;
+  string description = 3;
+  string instructions = 4;
+  int64 servings = 5;
+  repeated RecipeIngredient ingredients = 6;
 }
